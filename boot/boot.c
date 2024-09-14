@@ -4,9 +4,9 @@
 // DO NOT DEFINE ANY NON-LOCAL VARIBLE!
 
 void load_kernel() {
-  char hello[] = {'\n', 'h', 'e', 'l', 'l', 'o', '\n', 0};
-  putstr(hello);
-  while (1) ;
+  // char hello[] = {'\n', 'h', 'e', 'l', 'l', 'o', '\n', 0};
+  // putstr(hello);
+  // while (1) ;
   // remove both lines above before write codes below
   Elf32_Ehdr *elf = (void *)0x8000;
   copy_from_disk(elf, 255 * SECTSIZE, SECTSIZE);
@@ -16,9 +16,13 @@ void load_kernel() {
   for (; ph < eph; ph++) {
     if (ph->p_type == PT_LOAD) {
       // TODO: Lab1-2, Load kernel and jump
-      TODO();
+      void *dest = (void*)ph->p_vaddr;
+      void *src = (void*)((uint32_t)elf + ph->p_offset);
+      memcpy(dest, src, ph->p_filesz);
+      memset((void*)(ph->p_paddr + ph->p_filesz), 0, ph->p_memsz - ph->p_filesz);
+      // TODO(); 暂时忽略
     }
   }
-  uint32_t entry = 0; // change me in WEEK1-os-start
+  uint32_t entry = elf->e_entry; // change me in WEEK1-os-start
   ((void(*)())entry)();
 }

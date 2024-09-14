@@ -13,7 +13,10 @@ _start:
   lgdt gdt_desc  # loading gdt
 
   # TODO: WEEK1-os-start, set the lowest bit of cr0
-
+  movl %cr0, %eax     # move cr0 to eax
+  orl $0x1, %eax      # set the lowest bit (protection enable)
+  movl %eax, %cr0     # move eax back to cr0
+  
   ljmp $0x08, $start32 # reload code segment selector and ljmp to start32
 
 .code32
@@ -41,8 +44,12 @@ gdt: # 8 bytes for each table entry, at least 1 entry
   .byte 0, 0, 0, 0
 
   # TODO: WEEK1-os-start, code segment entry
+  .word 0xFFFF, 0x0000
+  .byte 0x00, 0x9A, 0xCF, 0x00
 
   # TODO: WEEK1-os-start, data segment entry
+  .word 0xFFFF, 0x0000
+  .byte 0x00, 0x92, 0xCF, 0x00
 
 gdt_desc: # 6 bytes in total
   .word (gdt_desc - gdt - 1) # sizeof(gdt) - 1

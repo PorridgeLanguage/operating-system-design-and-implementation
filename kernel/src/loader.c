@@ -23,8 +23,19 @@ uint32_t load_elf(PD *pgdir, const char *name) {
     iread(inode, elf.e_phoff + i * sizeof(ph), &ph, sizeof(ph));
     if (ph.p_type == PT_LOAD) {
       // WEEK1: Load segment to physical memory
-      // TODO();
-
+      
+      // 计算段在文件中的偏移量和大小
+      void *dest = (void *)ph.p_vaddr;
+      uint32_t offset = ph.p_offset;
+      uint32_t filesz = ph.p_filesz;
+      uint32_t memsz = ph.p_memsz;
+      // 从文件中读取段内容到内存
+      iread(inode, offset, dest, filesz);
+      // 如果段在内存中需要更大空间，额外部分置为0
+      if (memsz > filesz) {
+        memset((void *)(dest + filesz), 0, memsz - filesz);
+      }
+      
       // WEEK3-virtual-memory: Load segment to virtual memory
       // TODO();
     }

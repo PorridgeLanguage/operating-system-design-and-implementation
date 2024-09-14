@@ -17,7 +17,7 @@ int main() {
   //init_page(); // uncomment me at WEEK3-virtual-memory
   //init_cte(); // uncomment me at WEEK2-interrupt
   //init_timer(); // uncomment me at WEEK2-interrupt
-  // init_proc(); // uncomment me at WEEK1-os-start
+  init_proc(); // uncomment me at WEEK1-os-start
   //init_dev(); // uncomment me at Lab3-1
   printf("Hello from OS!\n");
   init_user_and_go();
