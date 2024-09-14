@@ -14,12 +14,12 @@ extern void *syscall_handle[NR_SYS];
 
 void do_syscall(Context *ctx) {
   // TODO: WEEK2-interrupt call specific syscall handle and set ctx register
-  int sysnum = 0;
-  uint32_t arg1 = 0;
-  uint32_t arg2 = 0;
-  uint32_t arg3 = 0;
-  uint32_t arg4 = 0;
-  uint32_t arg5 = 0;
+  int sysnum = ctx->eax;
+  uint32_t arg1 = ctx->ebx;
+  uint32_t arg2 = ctx->ecx;
+  uint32_t arg3 = ctx->edx;
+  uint32_t arg4 = ctx->esi;
+  uint32_t arg5 = ctx->edi;
   int res;
   if (sysnum < 0 || sysnum >= NR_SYS) {
     res = -1;
@@ -69,8 +69,15 @@ void sys_sleep(int ticks) {
 int sys_exec(const char *path, char *const argv[]) {
   // TODO(); // WEEK2-interrupt, WEEK3-virtual-memory
   // DEFAULT
-  printf("sys_exec is not implemented yet.");
-  while(1);
+  // printf("sys_exec is not implemented yet.");
+  // while(1);
+  PD *pgdir = NULL;
+  proc_t *proc = proc_curr();
+  if (load_user(pgdir, proc->ctx, path, argv) != 0) {
+    return -1;
+  }
+  irq_iret(proc->ctx);
+  return 0;
 }
 
 int sys_getpid() {

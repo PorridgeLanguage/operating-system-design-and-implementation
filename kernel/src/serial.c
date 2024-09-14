@@ -90,8 +90,8 @@ char getchar() {
   char ch;
 
   while ((ch = pop_front()) == 0) {
-    serial_handle();
-    // sti(); hlt(); cli(); // change to me in WEEK2-interrupt
+    // serial_handle();
+    sti(); hlt(); cli(); // change to me in WEEK2-interrupt
     // proc_yield(); // change to me in WEEK4-process-api
   }
 

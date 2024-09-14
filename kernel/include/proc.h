@@ -30,8 +30,8 @@ typedef struct proc {
   size_t pid;
   enum {UNUSED, UNINIT, RUNNING, READY, ZOMBIE, BLOCKED} status;
   // WEEK2-interrupt
-  //kstack_t *kstack;
-  //Context *ctx; // points to restore context for READY proc
+  kstack_t *kstack;
+  Context *ctx; // points to restore context for READY proc
   // WEEK3-virtual-memory
   //PD *pgdir; 
   //size_t brk;

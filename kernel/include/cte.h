@@ -6,9 +6,20 @@
 // TODO: WEEK2: adjust the struct to the correct order
 // TODO: WEEK2: add esp and ss
 typedef struct Context {
-  uint32_t eax, ebx, ecx, edx, esi, 
-           edi, ebp, eip, cs, ds, 
-           eflags, irq, errcode;
+  uint32_t ds;
+  uint32_t ebp;
+  uint32_t edi;
+  uint32_t esi;
+  uint32_t edx;
+  uint32_t ecx;
+  uint32_t ebx;
+  uint32_t eax;
+  uint32_t irq;
+  uint32_t errcode;
+  uint32_t eip;
+  uint32_t cs;
+  uint32_t eflags;
+  uint32_t esp, ss;
 } Context;
 
 void init_cte();

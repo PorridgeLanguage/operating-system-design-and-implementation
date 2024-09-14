@@ -109,14 +109,26 @@ void irq_handle(Context *ctx) {
     exception_debug_handler(ctx);
   }
   switch (ctx->irq) {
-  // TODO: WEEK2 handle syscall
-  // TODO: WEEK2 handle serial and timer
-  // TODO: WEEK3-virtual-memory: page fault
-  // TODO: WEEK4-process-api: schedule
-  default: {
-    // printf("Get error irq %d\n", ctx->irq);
-    assert(ctx->irq >= T_IRQ0 && ctx->irq < T_IRQ0 + NR_INTR);
-  }
+    // TODO: WEEK2 handle syscall
+    // TODO: WEEK2 handle serial and timer
+    // TODO: WEEK3-virtual-memory: page fault
+    // TODO: WEEK4-process-api: schedule
+    case EX_SYSCALL:{
+      do_syscall(ctx); //系统调用
+      break;
+    }
+    case T_IRQ0 + IRQ_COM1: {
+      serial_handle(); // 串口终端
+      break;
+    }
+    case T_IRQ0 + IRQ_TIMER: {
+      timer_handle(); // 时钟中断
+      break;
+    }
+    default: {
+      // printf("Get error irq %d\n", ctx->irq);
+      assert(ctx->irq >= T_IRQ0 && ctx->irq < T_IRQ0 + NR_INTR);
+    }
   }
   irq_iret(ctx);
 }

@@ -13,6 +13,8 @@ void init_proc() {
   // WEEK1: init proc status
   pcb[0].status = RUNNING;
   // WEEK2: add ctx and kstack for interruption
+  pcb[0].kstack = (void *)(KER_MEM - PGSIZE);
+  pcb[0].ctx = &pcb[0].kstack->ctx;
   // WEEK3: add pgdir
   // WEEK5: semaphore
   // TODO();
@@ -28,6 +30,10 @@ proc_t *proc_alloc() {
       pcb[i].pid = next_pid++;
       pcb[i].status = UNINIT;
 
+      pcb[i].kstack = (kstack_t *)(KER_MEM - 2 * PGSIZE);
+      pcb[i].ctx = &pcb[i].kstack->ctx;
+
+      return &pcb[i]; // 返回新分配的进程控制块
     }
   }
   return NULL; 
@@ -44,10 +50,17 @@ proc_t *proc_curr() {
 }
 
 void proc_run(proc_t *proc) {
-  // WEEK1: start os
+  // // WEEK1: start os
+  // proc->status = RUNNING;
+  // curr = proc;
+  // ((void(*)())curr->entry)();
+
+  // WEEK2: interrupt
   proc->status = RUNNING;
   curr = proc;
-  ((void(*)())curr->entry)();
+  set_tss(KSEL(SEG_KDATA), (uint32_t)STACK_TOP(proc->kstack));
+  irq_iret(proc->ctx);
+
 }
 
 void proc_addready(proc_t *proc) {
