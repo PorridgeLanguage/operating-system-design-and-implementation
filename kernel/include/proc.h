@@ -33,8 +33,8 @@ typedef struct proc {
   kstack_t *kstack;
   Context *ctx; // points to restore context for READY proc
   // WEEK3-virtual-memory
-  //PD *pgdir; 
-  //size_t brk;
+  PD *pgdir; 
+  size_t brk;
   // WEEK4-process-api
   //struct proc *parent; 
   //int child_num; 

@@ -125,6 +125,9 @@ void irq_handle(Context *ctx) {
       timer_handle(); // 时钟中断
       break;
     }
+    case EX_PF: {
+      vm_pgfault(get_cr2(), ctx->errcode);
+    }
     default: {
       // printf("Get error irq %d\n", ctx->irq);
       assert(ctx->irq >= T_IRQ0 && ctx->irq < T_IRQ0 + NR_INTR);

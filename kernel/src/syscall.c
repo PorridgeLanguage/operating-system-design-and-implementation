@@ -41,13 +41,14 @@ int sys_read(int fd, void *buf, size_t count) {
 
 int sys_brk(void *addr) {
   // TODO: WEEK3-virtual-memory
-  // proc_t * proc = proc_curr();// uncomment me in WEEK3-virtual-memory
-  size_t brk = 0; // rewrite me
-  size_t new_brk = 0; // rewrite me
+  proc_t * proc = proc_curr();// uncomment me in WEEK3-virtual-memory
+  size_t brk = proc->brk; // rewrite me
+  size_t new_brk = (size_t)PAGE_UP(addr); // rewrite me
   if (brk == 0) {
-    // proc_curr()->brk = new_brk; // uncomment me in WEEK3-virtual-memory
+    proc_curr()->brk = new_brk; // uncomment me in WEEK3-virtual-memory
   } else if (new_brk > brk) {
-    TODO();
+    vm_map(proc->pgdir, brk, new_brk - brk, 7);
+    proc->brk = new_brk;
   } else if (new_brk < brk) {
     // can just do nothing
     // recover memory, Lab 1 extend
@@ -71,17 +72,28 @@ int sys_exec(const char *path, char *const argv[]) {
   // DEFAULT
   // printf("sys_exec is not implemented yet.");
   // while(1);
-  PD *pgdir = NULL;
+  PD *pgdir = vm_alloc();
+  // if (pgdir == NULL) {
+  //   return -1;
+  // }
   proc_t *proc = proc_curr();
   if (load_user(pgdir, proc->ctx, path, argv) != 0) {
+    kfree(pgdir);
     return -1;
   }
+
+  proc->pgdir = pgdir;           // 更新当前进程的页目录
+  set_cr3(pgdir);       // 设置 CR3 寄存器为新页目录
+  
+  set_tss(KSEL(SEG_KDATA), (uint32_t)proc->kstack + PGSIZE);
   irq_iret(proc->ctx);
   return 0;
 }
 
 int sys_getpid() {
-  TODO(); // WEEK3-virtual-memory
+  // TODO(); // WEEK3-virtual-memory
+  proc_t *current_proc = proc_curr();
+  return current_proc->pid;
 }
 
 int sys_gettid() {
