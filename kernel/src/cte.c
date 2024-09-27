@@ -99,6 +99,7 @@ void init_cte() {
   idt[47] = GATE32(STS_IG, KSEL(SEG_KCODE), irq47, DPL_KERN);
   idt[128] = GATE32(STS_IG, KSEL(SEG_KCODE), irq128, DPL_USER);
   // TODO: WEEK4-process-api set idt[129]
+  idt[129] = GATE32(STS_IG, KSEL(SEG_KCODE), irq129, DPL_KERN);
   set_idt(idt, sizeof(idt));
   init_intr();
 }
@@ -127,6 +128,11 @@ void irq_handle(Context *ctx) {
     }
     case EX_PF: {
       vm_pgfault(get_cr2(), ctx->errcode);
+      break;
+    }
+    case 0x81: {
+      schedule(ctx);
+      break;
     }
     default: {
       // printf("Get error irq %d\n", ctx->irq);

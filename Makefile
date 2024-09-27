@@ -5,7 +5,7 @@ default: all
 .PHONY: clean clean-all clean-fs all qemu qemu-gdb gdb print-gdbport grade submit pack
 
 # REMEMBER TO MAKE CLEAN AFTER CHANGE ME!
-STAGE  := week3
+STAGE  := week4
 STAGES := week1 week2 week3 week4 week5 week6 week7 week8 week9 week10 week11 week12
 
 ifeq ($(filter $(STAGES), $(STAGE)), ) # STAGE must be valid

@@ -26,12 +26,14 @@ int main() {
 
 void init_user_and_go() {
 
-  // WEEK3: virtual memory
   proc_t *proc = proc_alloc();
   assert(proc);
-  char *argv[] = {"sh1", NULL}; 
-  assert(load_user(proc->pgdir, proc->ctx, "sh1", argv) == 0);
-  
-  proc_run(proc);
+  // char *argv[] = {"ping3", "114514", "1919810", NULL};
+  // assert(load_user(proc->pgdir, proc->ctx, "ping3", argv) == 0);
+  char *argv[] = {"sh", NULL};
+  assert(load_user(proc->pgdir, proc->ctx, "sh", argv) == 0);
+  proc_addready(proc);
 
+  sti();
+  while(1);
 }

@@ -17,7 +17,7 @@ void init_timer() {
 
 void timer_handle() {
   ++tick;
-  // proc_yield(); // TODO: uncomment me in WEEK4-process-api
+  proc_yield(); // TODO: uncomment me in WEEK4-process-api
 }
 
 uint32_t get_tick() {

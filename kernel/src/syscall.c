@@ -60,8 +60,8 @@ void sys_sleep(int ticks) {
   // TODO(); // WEEK2-interrupt
   uint32_t beg_tick = get_tick();
   while(get_tick() - beg_tick <= ticks){
-    sti(); hlt(); cli(); // chage to me in WEEK2-interrupt
-    // proc_yield(); // change to me in WEEK4-process-api
+    // sti(); hlt(); cli(); // chage to me in WEEK2-interrupt
+    proc_yield(); // change to me in WEEK4-process-api
     // thread_yield();
   }
   return;
@@ -73,9 +73,9 @@ int sys_exec(const char *path, char *const argv[]) {
   // printf("sys_exec is not implemented yet.");
   // while(1);
   PD *pgdir = vm_alloc();
-  // if (pgdir == NULL) {
-  //   return -1;
-  // }
+  if (pgdir == NULL) {
+    return -1;
+  }
   proc_t *proc = proc_curr();
   if (load_user(pgdir, proc->ctx, path, argv) != 0) {
     kfree(pgdir);
@@ -105,7 +105,14 @@ void sys_yield() {
 }
 
 int sys_fork() {
-  TODO(); // WEEK4-process-api
+  // TODO(); // WEEK4-process-api
+  proc_t *child_pcb = proc_alloc();
+  if (child_pcb == NULL) {
+    return -1;
+  }
+  proc_copycurr(child_pcb);
+  proc_addready(child_pcb);
+  return child_pcb->pid;
 }
 
 void sys_exit(int status) {
@@ -113,12 +120,36 @@ void sys_exit(int status) {
 }
 
 void sys_exit_group(int status) {
-  TODO();
+  // TODO();
   // WEEK4 process api
+  proc_t *curr_proc = proc_curr();
+  proc_makezombie(curr_proc, status);
+  INT(0x81);
+  assert(0);
 }
 
 int sys_wait(int *status) {
-  TODO(); // WEEK4 process api
+  // TODO(); // WEEK4 process api
+  proc_t *curr_proc = proc_curr();
+
+  if (curr_proc->child_num == 0) {
+    return -1;
+  }
+
+  proc_t *zombie_child = proc_findzombie(curr_proc);
+  while (zombie_child == NULL) {
+    proc_yield();
+    zombie_child = proc_findzombie(curr_proc);
+
+  }
+  if (status != NULL) {
+    *status = zombie_child->exit_code;
+  }
+  int pid = zombie_child->pid;
+  proc_free(zombie_child);
+
+  curr_proc->child_num--;
+  return pid;
 }
 
 int sys_sem_open(int value) {

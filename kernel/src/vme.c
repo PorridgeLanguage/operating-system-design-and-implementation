@@ -199,7 +199,19 @@ void vm_unmap(PD *pgdir, size_t va, size_t len) {
 
 void vm_copycurr(PD *pgdir) {
   // WEEK4-process-api: copy memory mapped in curr pd to pgdir
-  TODO();
+  // TODO();
+  for (size_t va = PHY_MEM; va < USR_MEM; va += PGSIZE) {
+    PTE *pte_src = vm_walkpte(vm_curr(), va, 7);
+    if (pte_src != NULL && pte_src->present) {
+      vm_map(pgdir, va, PGSIZE, 7);
+
+      PTE *pte_dst = vm_walkpte(pgdir, va, 7);
+      void *pa_dst = PTE2PG(*pte_dst);
+      void *pa_src = PTE2PG(*pte_src);
+
+      memcpy(pa_dst, pa_src, PGSIZE);
+    }
+  }
 }
 
 void vm_pgfault(size_t va, int errcode) {

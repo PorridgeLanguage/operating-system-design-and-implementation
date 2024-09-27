@@ -36,9 +36,9 @@ typedef struct proc {
   PD *pgdir; 
   size_t brk;
   // WEEK4-process-api
-  //struct proc *parent; 
-  //int child_num; 
-  //int exit_code;
+  struct proc *parent; 
+  int child_num; 
+  int exit_code;
   // WEEK5-semaphore
   //sem_t zombie_sem; 
   //usem_t *usems[MAX_USEM];

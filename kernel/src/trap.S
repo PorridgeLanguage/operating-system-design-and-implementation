@@ -35,7 +35,10 @@
 .globl irq46; irq46: push $0; push $46; jmp trap;
 .globl irq47; irq47: push $0; push $47; jmp trap;
 .globl irq128; irq128: push $0; push $128; jmp trap;
+.globl irq129; irq129: push $0; push $129; jmp trap;
+
 .globl irqall; irqall: push $0; push $-1;  jmp trap;
+
 
 trap:
   pushl %eax
@@ -71,3 +74,4 @@ irq_iret:
   popl %eax
   addl $8, %esp               # skip #irq and error code
   iret
+  

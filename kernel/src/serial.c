@@ -91,8 +91,8 @@ char getchar() {
 
   while ((ch = pop_front()) == 0) {
     // serial_handle();
-    sti(); hlt(); cli(); // change to me in WEEK2-interrupt
-    // proc_yield(); // change to me in WEEK4-process-api
+    // sti(); hlt(); cli(); // change to me in WEEK2-interrupt
+    proc_yield(); // change to me in WEEK4-process-api
   }
 
   // TODO: WEEK5-semaphore rewrite getchar with sem, P(sem) then pop_front

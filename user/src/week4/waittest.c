@@ -17,7 +17,7 @@ void waittest(void) {
     printf("fork claimed to work N times!\n");
     goto bad;
   }
-
+  
   for (; n > 0; n--) {
     if (wait(0) < 0) {
       printf("wait stopped early\n");
