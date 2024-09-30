@@ -40,9 +40,8 @@ typedef struct proc {
   int child_num; 
   int exit_code;
   // WEEK5-semaphore
-  //sem_t zombie_sem; 
-  //usem_t *usems[MAX_USEM];
-
+  sem_t zombie_sem; 
+  usem_t *usems[MAX_USEM];
 
   //file_t *files[MAX_UFILE]; // Lab3-1
   //inode_t *cwd; // Lab3-2

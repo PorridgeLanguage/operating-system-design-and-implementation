@@ -40,6 +40,9 @@ static void push_back(char ch) {
   buffer[tail++ % BUFFER_SIZE] = ch;
   // TODO: WEEK5-semaphore V(sem) tail-clapboard times if ch=='\n'
   if (ch == '\n') {
+    for (int i = 0; i < tail - clapboard; i++) {
+      sem_v(&serial_sem);
+    }
     clapboard = tail;
   }
 }
@@ -89,14 +92,16 @@ void serial_handle() {
 char getchar() {
   char ch;
 
-  while ((ch = pop_front()) == 0) {
-    // serial_handle();
-    // sti(); hlt(); cli(); // change to me in WEEK2-interrupt
-    proc_yield(); // change to me in WEEK4-process-api
-  }
+  // while ((ch = pop_front()) == 0) {
+  //   // serial_handle();
+  //   // sti(); hlt(); cli(); // change to me in WEEK2-interrupt
+  //   proc_yield(); // change to me in WEEK4-process-api
+  // }
 
   // TODO: WEEK5-semaphore rewrite getchar with sem, P(sem) then pop_front
-
+  sem_p(&serial_sem);
+  ch = pop_front();
+  assert(ch != 0);
   return ch;
 }
 
