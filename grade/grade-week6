@@ -1,0 +1,250 @@
+#!/usr/bin/env python3
+
+import os
+import re
+import subprocess
+from gradelib import *
+
+STOPS = [stop_on_line(".*failed.*"), 
+         stop_on_line(".*Abort @.*")]
+
+r = Runner(save("qemu.out"))
+
+@test(15, "mmaptest")
+def test_mmaptest():
+  s = """
+  $ mmaptest
+  mmap test begins.
+  mmap test executes mmap().
+  Hello, world!
+  munmap test
+  Man, what can I say? Mamba Out! 
+  munmap test
+  mmap test ends.
+  $ echo OK
+  OK
+  """
+  script, exps, isregs = parse_script(s)
+  r.run_qemu(*STOPS, shell_script(script))
+  r.match(*exps, isregs=isregs, continued=True)
+
+@test(15, "reader-writer")
+def test_reader_writer():
+    reader_times = [0, 0, 0]
+    writer_times = [0, 0]
+    curr_line, MAXLINE = 0, 150
+    fail = False
+
+    def handle(line: str):
+        if line.endswith("is reading file.") or line.endswith("is writing file."):
+            handle_rw(line)
+        else:
+            set_fail(line)
+  
+    def handle_rw(line: str):
+        nonlocal curr_line
+        if "Reader" in line:
+            no_str = line[7:8]
+            if not no_str.isdigit():
+                set_fail(line)
+            no = int(no_str)
+            if no < 0 or no >= 3:
+                set_fail(line)
+            reader_times[no] += 1
+        elif "Writer" in line:
+            no_str = line[7:8]
+            if not no_str.isdigit():
+                set_fail(line)
+            no = int(no_str)
+            if no < 0 or no >= 2:
+                set_fail(line)
+            writer_times[no] += 1
+        curr_line += 1
+        if curr_line >= MAXLINE:
+            raise TerminateTest
+
+    def set_fail(_):
+        nonlocal fail
+        fail = True
+        raise TerminateTest
+
+    r.run_qemu(call_on_line(".*failed.*", set_fail), 
+               call_on_line(".*Abort @.*", set_fail), 
+               call_on_line(r"(^Reader \d is reading file\.$)|(^Writer \d is writing file\.$)", handle),
+               shell_script(['reader']))
+    assert not fail
+    assert all(x > 0 for x in reader_times)  # Ensure each reader has read at least once
+    assert all(x > 0 for x in writer_times)  # Ensure each writer has written at least once
+
+@test(20, "sleeping-barber")
+def test_sleeping_barber():
+    max_customers = 20  # Total number of customers
+    max_chairs = 5      # Number of chairs in the waiting room
+    waiting_customers = 0
+    barber_active = False
+    customers_cut = 0
+    customers_leaving = 0
+    customer_done = 0  # Count of customers either getting a cut or leaving
+    fail = False
+
+    def handle(line: str):
+        if line.endswith("finds a chair to sit."):
+            handle_find_chair(line)
+        elif line.endswith("just leaves for no empty chair."):
+            handle_leave(line)
+        elif line.endswith("gets hair cut."):
+            handle_get_haircut(line)
+        elif line.endswith("starts cutting hair."):
+            handle_start_cutting(line)
+        elif line.endswith("ends cutting hair."):
+            handle_end_cutting(line)
+        else:
+            set_fail(line)
+
+    def handle_find_chair(line: str):
+        nonlocal waiting_customers, max_chairs
+        if waiting_customers >= max_chairs:
+            set_fail(line)
+        waiting_customers += 1
+        
+    def handle_leave(line: str):
+        nonlocal waiting_customers, max_chairs, customers_leaving, customer_done
+        if waiting_customers < max_chairs:
+            set_fail(line)
+        customers_leaving += 1
+        customer_done += 1
+
+    def handle_get_haircut(line: str):
+        nonlocal waiting_customers, customers_cut
+        if waiting_customers == 0:
+            set_fail(line)
+        waiting_customers -= 1
+        customers_cut += 1
+
+    def handle_start_cutting(line: str):
+        nonlocal barber_active
+        if barber_active:
+            set_fail(line)
+        barber_active = True
+
+    def handle_end_cutting(line: str):
+        nonlocal customer_done, barber_active, max_customers, customers_cut, customers_leaving
+        if not barber_active:
+            set_fail(line)
+        barber_active = False
+        customer_done += 1
+        # Check if all customers are processed
+        if customer_done == max_customers:
+            raise TerminateTest
+
+    def set_fail(_):
+        nonlocal fail
+        fail = True
+        raise TerminateTest
+
+    # Run the QEMU environment with the barber program
+    r.run_qemu(call_on_line(".*failed.*", set_fail),
+               call_on_line(".*Abort @.*", set_fail),
+               call_on_line(r"(^The customer \d just finds a chair to sit\.$)|"
+                            r"(^The customer \d just leaves for no empty chair\.$)|"
+                            r"(^The customer \d gets hair cut\.$)|"
+                            r"(^The customer \d\d just finds a chair to sit\.$)|"
+                            r"(^The customer \d\d just leaves for no empty chair\.$)|"
+                            r"(^The customer \d\d gets hair cut\.$)|"
+                            r"(^The barber starts cutting hair\.$)|"
+                            r"(^The barber ends cutting hair\.$)", handle),
+               shell_script(['barber']))
+
+    assert not fail
+    assert customers_cut + customers_leaving == max_customers
+    assert customers_cut > 0
+    
+@test(15, "cowtest")
+def test_cowtest():
+  s = """
+  $ cowtest
+  cowtest begins.
+  Parent: Memory content remains unchanged
+  cowtest ends.
+  $ echo OK
+  OK
+  """
+  script, exps, isregs = parse_script(s)
+  r.run_qemu(*STOPS, shell_script(script))
+  r.match(*exps, isregs=isregs, continued=True)
+
+@test(15, "forkfork")
+def test_forkfork():
+  s = """
+  $ forkfork
+  forkfork start
+  forkfork passed!
+  $ echo OK
+  OK
+  """
+  script, exps, isregs = parse_script(s)
+  r.run_qemu(*STOPS, shell_script(script))
+  r.match(*exps, isregs=isregs, continued=True)
+
+@test(20, "producer_cv")
+def test_producer_cv():
+  curr_buf, MAXBUF = 0, 32
+  curr_line, MAXLINE = 0, 300
+  fail = False
+  producer_times = [0, 0, 0, 0]
+  customer_times = [0, 0]
+
+  def handle(line: str):
+    if line.startswith("producer"):
+      handle_producer(line)
+    elif line.startswith("consumer"):
+      handle_customer(line)
+    else:
+      set_fail(line)
+
+  def handle_producer(line):
+    nonlocal curr_buf, curr_line
+    no_str = line[9:10]
+    if not no_str.isdigit():
+      set_fail(line)
+    no = int(no_str)
+    if no < 0 or no > 3:
+      set_fail(line)
+    if curr_buf >= MAXBUF:
+      set_fail(line)
+    curr_buf += 1
+    curr_line += 1
+    producer_times[no] += 1
+    if curr_line >= MAXLINE:
+      raise TerminateTest
+  
+  def handle_customer(line):
+    nonlocal curr_buf, curr_line
+    no_str = line[9:10]
+    if not no_str.isdigit():
+      set_fail(line)
+    no = int(no_str)
+    if no < 0 or no > 1:
+      set_fail(line)
+    if curr_buf < 0:
+      set_fail(line)
+    curr_buf -= 1
+    curr_line += 1
+    customer_times[no] += 1
+    if curr_line >= MAXLINE:
+      raise TerminateTest
+  
+  def set_fail(_):
+    nonlocal fail
+    fail = True
+    raise TerminateTest
+
+  r.run_qemu(call_on_line(".*failed.*", set_fail), 
+             call_on_line(".*Abort @.*", set_fail), 
+             call_on_line(r"(^producer \d: produce$)|(^consumer \d: consume$)", handle),
+             shell_script(['producer_cv']))
+  assert not fail
+  assert 0 not in producer_times
+  assert 0 not in customer_times
+
+run_tests()

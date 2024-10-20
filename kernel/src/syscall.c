@@ -229,11 +229,26 @@ int sys_unlink(const char *path) {
 // optional syscall
 
 void *sys_mmap() {
-  TODO();
+  // TODO();
+  // proc_t *proc = proc_curr(); // 获取当前进程
+  for (size_t mmap_va = USR_MEM; mmap_va < VIR_MEM; mmap_va += PGSIZE) {
+    // 检查该虚拟地址是否已经被占用
+    if (vm_walkpte(vm_curr()/*proc->pgdir*/, mmap_va, 0) == NULL) {
+      // 找到了空的虚拟页, 现在为该虚拟页分配物理内存
+      void *new_page = kalloc(); // 分配一页物理内存
+      if (new_page == NULL) {
+        return NULL; // 分配失败，返回 NULL
+      }
+      vm_map(vm_curr()/*proc->pgdir*/, mmap_va, PGSIZE, 7);
+      return (void *)mmap_va;
+    }
+  }
+  return NULL;
 }
 
 void sys_munmap(void *addr) {
-  TODO();
+  // TODO();
+  vm_unmap(vm_curr()/*proc_curr()->pgdir*/, (size_t)addr, PGSIZE);
 }
 
 int sys_clone(int (*entry)(void*), void *stack, void *arg, void (*ret_entry)(void)){
@@ -253,23 +268,41 @@ int sys_kill(int pid) {
 }
 
 int sys_cv_open() {
-  TODO();
+  return sys_sem_open(0);
 }
 
 int sys_cv_wait(int cv_id, int sem_id) {
-  TODO();
+  sys_sem_v(sem_id);
+  sys_sem_p(cv_id);
+  return 0;
 }
 
 int sys_cv_sig(int cv_id) {
-  TODO();
+  proc_t *cur_proc = proc_curr();
+  usem_t *cur_usem = proc_getusem(cur_proc, cv_id);
+  if (cur_usem == NULL) {
+    return -1;
+  }
+  if (cur_usem->sem.value < 0) {
+    sem_v(&cur_usem->sem);
+  }
+  return 0;
 }
 
 int sys_cv_sigall(int cv_id) {
-  TODO();
+  proc_t *cur_proc = proc_curr();
+  usem_t *cur_usem = proc_getusem(cur_proc, cv_id);
+  if (cur_usem == NULL) {
+    return -1;
+  }
+  while (cur_usem->sem.value < 0) {
+    sem_v(&cur_usem->sem);
+  }
+  return 0;
 }
 
 int sys_cv_close(int cv_id) {
-  TODO();
+  return sys_sem_close(cv_id);
 }
 
 int sys_pipe(int fd[2]) {

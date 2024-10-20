@@ -24,6 +24,9 @@ static PD kpd;
 
 static PT kpt[PHY_MEM / PT_SIZE] __attribute__((used));
 
+// week06
+static size_t pm_ref[PHY_MEM / PGSIZE];
+
 typedef union free_page {
     union free_page *next;
     char buf[PGSIZE];
@@ -66,6 +69,11 @@ void init_page() {
     page->next = free_page_list;
     free_page_list = page;
   }
+
+  // WEEK6-init pm_ref
+  for (size_t i = 0; i < PHY_MEM / PGSIZE; i++) {
+    pm_ref[i] = 0;
+  }
 }
 
 void *kalloc() {
@@ -80,16 +88,29 @@ void *kalloc() {
   if (page->next == NULL) {
     return 0;
   }
-
+  size_t pg_index = (size_t)page / PGSIZE;
+  pm_ref[pg_index] = 1;
   free_page_list = free_page_list->next;
   memset(page, 0x0, PGSIZE);
+  
   return page;
 }
 
 void kfree(void *ptr) {
   // WEEK3-virtual-memory: free a page to kernel heap
-  // you can just do nothing :)
-  // TODO();
+  
+  // WEEK06
+  size_t pg_index = (size_t)ptr / PGSIZE;
+  // if (pm_ref[pg_index] > 0) {
+  //   pm_ref[pg_index] = pm_ref[pg_index] - 1;
+  // }
+  pm_ref[pg_index] = pm_ref[pg_index] - 1;
+  if (pm_ref[pg_index] == 0) {
+    page_t *page = (page_t *)ptr;
+    memset(ptr, 0, PGSIZE);
+    page->next = free_page_list;
+    free_page_list = page;
+  }
 }
 
 PD *vm_alloc() {
@@ -114,7 +135,21 @@ void vm_teardown(PD *pgdir) {
   // WEEK3-virtual-memory: free all pages mapping above PHY_MEM in pgdir, then free itself
   // you can just do nothing :)
   // TODO();
-
+  for (int i = PHY_MEM / PT_SIZE; i < NR_PDE; i++) {
+    // unmap the PT
+    if (!(pgdir->pde[i].present)) {
+      continue;
+    }
+    // free the physical page
+    for (int j = 0; j < NR_PTE; j++) {
+      if (PDE2PT(pgdir->pde[i])->pte[j].val & PTE_P) {
+        kfree(PTE2PG(PDE2PT(pgdir->pde[i])->pte[j]));
+      }
+    }
+    // free the PT
+    kfree(PDE2PT(pgdir->pde[i]));
+  }
+  kfree(pgdir);
 }
 
 PD *vm_curr() {
@@ -185,6 +220,7 @@ void vm_map(PD *pgdir, size_t va, size_t len, int prot) {
       // just let pte->prot |= prot
       pte->val |= prot;
     }
+    pte->cow = pte->read_write;
   }
 }
 
@@ -194,27 +230,77 @@ void vm_unmap(PD *pgdir, size_t va, size_t len) {
   // assert(ADDR2OFF(va) == 0);
   // assert(ADDR2OFF(len) == 0);
   // TODO();
-  
+  assert(ADDR2OFF(va) == 0);
+  assert(ADDR2OFF(len) == 0);
+  for(size_t i=va;i<va+len;i+=PGSIZE){
+    PTE *pte = vm_walkpte(pgdir, i, 0);
+    if(pte->present){
+      kfree(vm_walk(pgdir, i, PTE_P));
+    }
+    pte->val=0;
+  }
+  if (pgdir == vm_curr()) {
+    set_cr3(pgdir);
+  }  
 }
 
 void vm_copycurr(PD *pgdir) {
   // WEEK4-process-api: copy memory mapped in curr pd to pgdir
   // TODO();
   for (size_t va = PHY_MEM; va < USR_MEM; va += PGSIZE) {
-    PTE *pte_src = vm_walkpte(vm_curr(), va, 7);
-    if (pte_src != NULL && pte_src->present) {
-      vm_map(pgdir, va, PGSIZE, 7);
-
-      PTE *pte_dst = vm_walkpte(pgdir, va, 7);
-      void *pa_dst = PTE2PG(*pte_dst);
-      void *pa_src = PTE2PG(*pte_src);
-
-      memcpy(pa_dst, pa_src, PGSIZE);
+    PTE *pte_src = vm_walkpte(vm_curr(), va, 0);
+    if (pte_src != NULL && (pte_src->val & PTE_P)) {
+      // WEEK6
+      int port = pte_src->val & 7;
+      PTE* pte_dest = vm_walkpte(pgdir, va, port | PTE_W);
+      pte_src->read_write = 0; // 权限设为只读
+      pte_dest->val = pte_src->val; // 复制页表项
+      int index = (size_t)PTE2PG(*pte_dest) / PGSIZE;
+      pm_ref[index]++; // 引用加1
     }
   }
+  // 处理 [USR_MEM, VIR_MEM) 共享内存区域
+  for (size_t va = USR_MEM; va < VIR_MEM; va += PGSIZE) {
+    PTE *pte = vm_walkpte(vm_curr(), va, 0);
+    if (pte != NULL && pte->val & PTE_P) {
+      int port = pte->val & 7;
+      void *pa = vm_walk(vm_curr(), va, port);
+      int index = (size_t)pa / PGSIZE;
+      pm_ref[index]++;
+      PTE* new_pte = vm_walkpte(pgdir, va, port);
+      *new_pte = *pte;
+    }
+  }
+
 }
 
 void vm_pgfault(size_t va, int errcode) {
+  if (errcode & 2) { // write error
+    PD *pgdir = vm_curr();
+    PTE *pte = vm_walkpte(pgdir, va, 0);
+    // Cases that are not real cow: goto bad
+    if (pte == NULL || !(pte->val & PTE_P) || !pte->cow) {
+      goto bad;
+    }
+    // Copy on Write: allocates a new physical page and copies the contents of the original page to the new page
+    pte->read_write = 1;
+    int index = (size_t)PTE2PG(*pte) / PGSIZE;
+    if (pm_ref[index] > 1) {
+      pm_ref[index]--;
+      void *page = kalloc();
+      memcpy(page, PTE2PG(*pte), PGSIZE);
+      pte->page_frame = (size_t) page >> 12;
+      pte->cow = pte->read_write;
+    }
+  } else {
+    goto bad;
+  }
+  set_cr3(vm_curr());
+  return;
+
+bad:
   printf("pagefault @ 0x%p, errcode = %d\n", va, errcode);
   panic("pgfault");
+
 }
+

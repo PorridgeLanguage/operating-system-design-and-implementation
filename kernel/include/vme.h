@@ -18,6 +18,6 @@ void *vm_walk(PD *pgdir, size_t va, int prot);
 void vm_map(PD *pgdir, size_t va, size_t len, int prot);
 void vm_unmap(PD *pgdir, size_t va, size_t len);
 void vm_copycurr(PD *pgdir);
-void vm_pgfault(size_t va, int errcode) __attribute__((noreturn));
+void vm_pgfault(size_t va, int errcode);
 
 #endif

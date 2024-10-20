@@ -1,6 +1,6 @@
 {
-    "name": "week5",
-    "endpoint": "week5",
+    "name": "week6",
+    "endpoint": "week6",
     "src": [
         "boot/boot.c",
         "boot/boot.h",
@@ -39,7 +39,7 @@
         "kernel/src/timer.c",
         "kernel/src/trap.S",
         "kernel/src/vme.c",
-        "user/src/week5/philosopher.c"
+        "user/src/week6/barber.c"
     ],
     "tests": {},
     "protocols": [

@@ -35,6 +35,8 @@
 #define SEG_UDATA      4       // User data/stack
 #define SEG_TSS        5       // Global unique task state segement
 
+#define VIR_MEM  0xf0000000
+
 #ifndef __ASSEMBLER__
 
 #include <stdint.h>
@@ -130,13 +132,14 @@ typedef union PageTableEntry {
     uint32_t page_cache_disable : 1;
     uint32_t accessed : 1;
     uint32_t dirty : 1;
-    uint32_t pad0 : 1;
+    uint32_t cow : 1;     /* pad0 --> cow */
     uint32_t global : 1;
     uint32_t pad1 : 3;
     uint32_t page_frame : 20;
   };
   uint32_t val;
 } PTE;
+
 
 typedef struct PageTable {
   PTE pte[NR_PTE] PG_ALIGN;
