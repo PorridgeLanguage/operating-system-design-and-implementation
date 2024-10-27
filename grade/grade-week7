@@ -1,0 +1,162 @@
+#!/usr/bin/env python3
+
+import os
+import re
+import subprocess
+from gradelib import *
+
+STOPS = [stop_on_line(".*failed.*"), 
+         stop_on_line(".*Abort @.*")]
+
+r = Runner(save("qemu.out"))
+
+@test(10, "thread_return")
+def test_thread_return():
+  s = """
+  $ thread_return
+  thread_return begins.
+  thread_return passed.  
+  $ echo OK
+  OK
+  """
+  script, exps, isregs = parse_script(s)
+  r.run_qemu(*STOPS, shell_script(script))
+  r.match(*exps, isregs=isregs, continued=True)
+
+@test(10, "thread_wait")
+def test_thread_wait():
+  s = """
+  $ thread_wait
+  thread_wait begins.
+  thread_wait passed.
+  $ echo OK
+  OK
+  """
+  script, exps, isregs = parse_script(s)
+  r.run_qemu(*STOPS, shell_script(script))
+  r.match(*exps, isregs=isregs, continued=True)
+
+@test(10, "thread_args")
+def test_thread_args():
+  s = """
+  $ thread_args
+  Hello, world!
+  This is a test for thread with args.
+  OK, thread_args is passed.
+  $ echo OK
+  OK
+  """
+  script, exps, isregs = parse_script(s)
+  r.run_qemu(*STOPS, shell_script(script))
+  r.match(*exps, isregs=isregs, continued=True)
+
+@test(10, "thread_fork")
+def test_thread_fork():
+  s = """
+  $ thread_fork
+  thread_fork begins.
+  thread_fork passed.
+  $ echo OK
+  OK
+  """
+  script, exps, isregs = parse_script(s)
+  r.run_qemu(*STOPS, shell_script(script))
+  r.match(*exps, isregs=isregs, continued=True)
+
+@test(10, "thread_exec")
+def test_thread_exec():
+  s = """
+  $ thread_exec
+  ^Main process \(PID: [0-9]{1,2}\) started.
+  ^Thread \(TID: [0-9]{1,2}\) in process \(PID: [0-9]{1,2}\) running...
+  good
+  ^Main thread \(TID: [0-9]{1,2}\) in process \(PID: [0-9]{1,2}\) running...
+  good
+  ^Main process \(PID: [0-9]{1,2}\) finished.
+  $ echo OK
+  OK
+  """
+  script, exps, isregs = parse_script(s)
+  r.run_qemu(*STOPS, shell_script(script))
+  r.match(*exps, isregs=isregs, continued=True)
+
+@test(10, "detach_test")
+def test_detach_test():
+  s = """
+  $ detachtest
+  ^Starting combined test in main process \(PID: [0-9]{1,2}\)
+  ^Running test_return_exit in process [0-9]{1,2}
+  ^Main thread \(PID: [0-9]{1,2}\): Not waiting for the detached thread
+  ^Detached thread [0-9]{1,2} is running in process [0-9]{1,2}
+  ^Main thread \(PID: [0-9]{1,2}\): Finishing with return
+  ^Running test_thread_exit in process [0-9]{1,2}
+  ^Main thread \(PID: [0-9]{1,2}\): Not waiting for the detached thread
+  ^Detached thread [0-9]{1,2} is running in process [0-9]{1,2}
+  ^Main thread \(PID: [0-9]{1,2}\): Finishing with thread_exit
+  ^Detached thread [0-9]{1,2} finished in process [0-9]{1,2}
+  ^Main process \(PID: [0-9]{1,2}\) finished
+  $ echo OK
+  OK
+  """
+  script, exps, isregs = parse_script(s)
+  r.run_qemu(*STOPS, shell_script(script))
+  r.match(*exps, isregs=isregs, continued=True)
+
+@test(10, "kill_test")
+def test_kill_test():
+  s = """
+  $ killtest
+  ^Main process \(PID: [0-9]{1,2}\) starts running.
+  ^Process \(PID: [0-9]{1,2}\) is running and will try to kill itself...
+  ^Child process \(PID: [0-9]{1,2}\) waiting for kill...
+  ^Parent process \(PID: [0-9]{1,2}\) trying to kill child \(PID: [0-9]{1,2}\)
+  ^The child process \(PID: [0-9]{1,2}\) is killed
+  ^Child process \(PID: [0-9]{1,2}\) killed by signal 9
+  ^Main process \(PID: [0-9]{1,2}\) finished.
+  $ echo OK
+  OK
+  """
+  script, exps, isregs = parse_script(s)
+  r.run_qemu(*STOPS, shell_script(script))
+  r.match(*exps, isregs=isregs, continued=True)
+
+@test(10, "join_test")
+def test_join_test():
+  s = """
+  $ jointest
+  ^Thread [0-9]{1,2} is running
+  ^Thread [0-9]{1,2} finished
+  Main thread: The thread has finished execution
+  $ echo OK
+  OK
+  """
+  script, exps, isregs = parse_script(s)
+  r.run_qemu(*STOPS, shell_script(script))
+  r.match(*exps, isregs=isregs, continued=True)
+  
+@test(10, "join_compute")
+def test_join_compute():
+  s = """
+  $ join_compute
+  Total sum calculated by threads: 84
+  $ echo OK
+  OK
+  """
+  script, exps, isregs = parse_script(s)
+  r.run_qemu(*STOPS, shell_script(script))
+  r.match(*exps, isregs=isregs, continued=True)
+
+@test(10, "join_after_detach")
+def test_join_after_detach():
+  s = """
+  $ join_after_detach
+  Thread running...
+  Error: Cannot join a detached thread (ESRCH).
+  $ echo OK
+  OK
+  """
+  script, exps, isregs = parse_script(s)
+  r.run_qemu(*STOPS, shell_script(script))
+  r.match(*exps, isregs=isregs, continued=True)
+
+run_tests()

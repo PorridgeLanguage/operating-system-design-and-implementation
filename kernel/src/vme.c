@@ -107,7 +107,7 @@ void kfree(void *ptr) {
   pm_ref[pg_index] = pm_ref[pg_index] - 1;
   if (pm_ref[pg_index] == 0) {
     page_t *page = (page_t *)ptr;
-    memset(ptr, 0, PGSIZE);
+    // memset(ptr, 0, PGSIZE);
     page->next = free_page_list;
     free_page_list = page;
   }

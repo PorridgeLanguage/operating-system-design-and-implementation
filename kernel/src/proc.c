@@ -1,19 +1,19 @@
-#include "klib.h"
-#include "cte.h"
 #include "proc.h"
+#include "cte.h"
+#include "klib.h"
 
 #define PROC_NUM 64
 
 static __attribute__((used)) int next_pid = 1;
 
 proc_t pcb[PROC_NUM];
-static proc_t *curr = &pcb[0];
+static proc_t* curr = &pcb[0];
 
 void init_proc() {
   // WEEK1: init proc status
   pcb[0].status = RUNNING;
   // WEEK2: add ctx and kstack for interruption
-  pcb[0].kstack = (void *)(KER_MEM - PGSIZE);
+  pcb[0].kstack = (void*)(KER_MEM - PGSIZE);
   pcb[0].ctx = &pcb[0].kstack->ctx;
   // WEEK3: add pgdir
   pcb[0].pgdir = vm_curr();
@@ -28,20 +28,29 @@ void init_proc() {
   // Lab2-1, set status and pgdir
   // Lab2-4, init zombie_sem
   // Lab3-2, set cwd
+  // WEEK7: initialize thread-related fields
+  pcb[0].tgid = pcb[0].pid;       // tgid == pid 默认为是主线程
+  pcb[0].thread_num = 1;          // 线程数量为1
+  pcb[0].group_leader = &pcb[0];  // group_leader指向自己
+  pcb[0].thread_group = NULL;     // 后一个线程为NULL
+
+  pcb[0].joinable = 1;
+  pcb[0].detached = 0;
+  sem_init(&(pcb[0].join_sem), 0);
 }
 
-proc_t *proc_alloc() {
+proc_t* proc_alloc() {
   // WEEK1: alloc a new proc, find a unused pcb from pcb[1..PROC_NUM-1], return NULL if no such one
   for (int i = 1; i < PROC_NUM; i++) {
     if (pcb[i].status == UNUSED) {
       pcb[i].pid = next_pid++;
       pcb[i].status = UNINIT;
 
-      //pcb[i].kstack = (kstack_t *)(KER_MEM - 2 * PGSIZE);
+      // pcb[i].kstack = (kstack_t *)(KER_MEM - 2 * PGSIZE);
       pcb[i].pgdir = vm_alloc();
       pcb[i].kstack = kalloc();
       pcb[i].ctx = &pcb[i].kstack->ctx;
-      
+
       // WEEK4: init parent and child_num
       pcb[i].parent = NULL;
       pcb[i].child_num = 0;
@@ -51,13 +60,23 @@ proc_t *proc_alloc() {
       for (int j = 0; j < MAX_USEM; j++) {
         pcb[i].usems[j] = NULL;
       }
-      return &pcb[i]; // 返回新分配的进程控制块
+      // WEEK7: initialize thread-related fields
+      pcb[i].tgid = pcb[i].pid;       // tgid == pid 默认为是主线程
+      pcb[i].thread_num = 1;          // 线程数量为1
+      pcb[i].group_leader = &pcb[i];  // group_leader指向自己
+      pcb[i].thread_group = NULL;     // 后一个线程为NULL
+
+      pcb[i].joinable = 1;
+      pcb[i].detached = 0;
+      sem_init(&(pcb[i].join_sem), 0);
+      // 返回新分配的进程控制块
+      return &pcb[i];
     }
   }
-  return NULL; 
+  return NULL;
 }
 
-void proc_free(proc_t *proc) {
+void proc_free(proc_t* proc) {
   // WEEK3-virtual-memory: free proc's pgdir and kstack and mark it UNUSED
   // TODO();
   proc->status = UNUSED;
@@ -69,22 +88,20 @@ void proc_free(proc_t *proc) {
   proc->brk = 0;
 }
 
-proc_t *proc_curr() {
+proc_t* proc_curr() {
   return curr;
 }
 
-void proc_run(proc_t *proc) {
-
+void proc_run(proc_t* proc) {
   // WEEK3: virtual memory
   proc->status = RUNNING;
   curr = proc;
   set_cr3(proc->pgdir);
   set_tss(KSEL(SEG_KDATA), (uint32_t)STACK_TOP(proc->kstack));
   irq_iret(proc->ctx);
-
 }
 
-void proc_addready(proc_t *proc) {
+void proc_addready(proc_t* proc) {
   // WEEK4-process-api: mark proc READY
   // TODO();
   proc->status = READY;
@@ -96,21 +113,24 @@ void proc_yield() {
   INT(0x81);
 }
 
-void proc_copycurr(proc_t *proc) {
+void proc_copycurr(proc_t* proc) {
   // WEEK4-process-api: copy curr proc
-  vm_copycurr(proc->pgdir);
-  proc->brk = curr->brk;
-  proc->kstack->ctx = curr->kstack->ctx;
-  
-  proc->kstack->ctx.eax = 0;
+  proc_t* leader = curr->group_leader;
 
-  proc->parent = curr;
-  curr->child_num++;
+  vm_copycurr(proc->pgdir);
+  proc->brk = leader->brk;
+  proc->kstack->ctx = curr->kstack->ctx;
+
+  proc->ctx->eax = 0;
+
+  proc->parent = leader;
+  leader->child_num++;
 
   // WEEK5-semaphore: dup opened usems
   for (int i = 0; i < MAX_USEM; i++) {
-    if (curr->usems[i]) {
-      proc->usems[i] = usem_dup(curr->usems[i]);
+    proc->usems[i] = leader->usems[i];
+    if (leader->usems[i]) {
+      proc->usems[i] = usem_dup(leader->usems[i]);
     }
   }
   // Lab3-1: dup opened files
@@ -118,13 +138,14 @@ void proc_copycurr(proc_t *proc) {
   // TODO();
 }
 
-void proc_makezombie(proc_t *proc, int exitcode) {
+void proc_makezombie(proc_t* proc, int exitcode) {
   // WEEK4-process-api: mark proc ZOMBIE and record exitcode, set children's parent to NULL
   proc->status = ZOMBIE;
   proc->exit_code = exitcode;
   for (int i = 0; i < PROC_NUM; i++) {
     if (pcb[i].parent == proc) {
       pcb[i].parent = NULL;
+      proc_set_kernel_parent(&pcb[i]);
     }
   }
   // WEEK5-semaphore: release parent's semaphore
@@ -137,12 +158,14 @@ void proc_makezombie(proc_t *proc, int exitcode) {
       usem_close(proc->usems[i]);
     }
   }
+  // WEEK7: 释放join_sem
+  sem_v(&proc->join_sem);
   // Lab3-1: close opened files
   // Lab3-2: close cwd
   // TODO();
 }
 
-proc_t *proc_findzombie(proc_t *proc) {
+proc_t* proc_findzombie(proc_t* proc) {
   // WEEK4-process-api: find a ZOMBIE whose parent is proc, return NULL if none
   // TODO();
   for (int i = 0; i < PROC_NUM; i++) {
@@ -159,35 +182,36 @@ void proc_block() {
   INT(0x81);
 }
 
-int proc_allocusem(proc_t *proc) {
-  // WEEK5: find a free slot in proc->usems, return its index, or -1 if none
+int proc_allocusem(proc_t* proc) {
+  // WEEK7: 使用主进程改写函数
+  proc_t* leader = proc->group_leader;  // 获取主进程
   for (int i = 0; i < MAX_USEM; i++) {
-    if (proc->usems[i] == NULL) {
+    if (leader->usems[i] == NULL) {
       return i;
     }
   }
   return -1;
 }
 
-usem_t *proc_getusem(proc_t *proc, int sem_id) {
-  // WEEK5: return proc->usems[sem_id], or NULL if sem_id out of bound
+usem_t* proc_getusem(proc_t* proc, int sem_id) {
+  // WEEK7: 使用主进程改写函数
   if (sem_id < 0 || sem_id >= MAX_USEM) {
     return NULL;
   }
-  return proc->usems[sem_id];
+  return proc->group_leader->usems[sem_id];
 }
 
-int proc_allocfile(proc_t *proc) {
+int proc_allocfile(proc_t* proc) {
   // Lab3-1: find a free slot in proc->files, return its index, or -1 if none
   TODO();
 }
 
-file_t *proc_getfile(proc_t *proc, int fd) {
+file_t* proc_getfile(proc_t* proc, int fd) {
   // Lab3-1: return proc->files[fd], or NULL if fd out of bound
   TODO();
 }
 
-void schedule(Context *ctx) {
+void schedule(Context* ctx) {
   // WEEK4-process-api: save ctx to curr->ctx, then find a READY proc and run it
   // TODO();
   curr->ctx = ctx;
@@ -200,4 +224,36 @@ void schedule(Context *ctx) {
     next_proc = (next_proc + 1) % PROC_NUM;
   }
   proc_run(curr);
+}
+
+void thread_free(proc_t* thread) {
+  if (thread == NULL) {
+    return;
+  }
+  memset(thread, 0, sizeof(proc_t));
+}
+
+int thread_detach(int tid) {
+  for (int i = 0; i < PROC_NUM; i++) {
+    if (pcb[i].pid == tid) {
+      pcb[i].detached = 1;
+      pcb[i].joinable = 0;
+      return 0;
+    }
+  }
+  return -1;
+}
+
+void proc_set_kernel_parent(proc_t* proc) {
+  proc->parent = pcb;
+  pcb->child_num += 1;
+}
+
+proc_t* pid2proc(int pid) {
+  for (int i = 0; i < PROC_NUM; i++) {
+    if (pcb[i].pid == pid) {
+      return &pcb[i];
+    }
+  }
+  return NULL;
 }

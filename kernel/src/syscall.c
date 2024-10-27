@@ -1,18 +1,18 @@
-#include "klib.h"
 #include "cte.h"
-#include "sysnum.h"
-#include "vme.h"
-#include "serial.h"
+#include "file.h"
+#include "klib.h"
 #include "loader.h"
 #include "proc.h"
+#include "serial.h"
+#include "sysnum.h"
 #include "timer.h"
-#include "file.h"
+#include "vme.h"
 
 typedef int (*syshandle_t)(uint32_t, uint32_t, uint32_t, uint32_t, uint32_t);
 
-extern void *syscall_handle[NR_SYS];
+extern void* syscall_handle[NR_SYS];
 
-void do_syscall(Context *ctx) {
+void do_syscall(Context* ctx) {
   // TODO: WEEK2-interrupt call specific syscall handle and set ctx register
   int sysnum = ctx->eax;
   uint32_t arg1 = ctx->ebx;
@@ -29,26 +29,27 @@ void do_syscall(Context *ctx) {
   ctx->eax = res;
 }
 
-int sys_write(int fd, const void *buf, size_t count) {
+int sys_write(int fd, const void* buf, size_t count) {
   // TODO: rewrite me at Lab3-1
   return serial_write(buf, count);
 }
 
-int sys_read(int fd, void *buf, size_t count) {
+int sys_read(int fd, void* buf, size_t count) {
   // TODO: rewrite me at Lab3-1
   return serial_read(buf, count);
 }
 
-int sys_brk(void *addr) {
+int sys_brk(void* addr) {
   // TODO: WEEK3-virtual-memory
-  proc_t * proc = proc_curr();// uncomment me in WEEK3-virtual-memory
-  size_t brk = proc->brk; // rewrite me
-  size_t new_brk = (size_t)PAGE_UP(addr); // rewrite me
+  proc_t* proc = proc_curr();              // uncomment me in WEEK3-virtual-memory
+  proc_t* leader = proc->group_leader;     // 获取主进程
+  size_t brk = leader->brk;                // 使用主进程的 brk
+  size_t new_brk = (size_t)PAGE_UP(addr);  // rewrite me
   if (brk == 0) {
-    proc_curr()->brk = new_brk; // uncomment me in WEEK3-virtual-memory
+    leader->brk = new_brk;  // 设置主线程的 brk
   } else if (new_brk > brk) {
-    vm_map(proc->pgdir, brk, new_brk - brk, 7);
-    proc->brk = new_brk;
+    vm_map(leader->pgdir, brk, new_brk - brk, 7);  // 映射新的内存
+    leader->brk = new_brk;                         // 更新主线程的 brk
   } else if (new_brk < brk) {
     // can just do nothing
     // recover memory, Lab 1 extend
@@ -59,45 +60,59 @@ int sys_brk(void *addr) {
 void sys_sleep(int ticks) {
   // TODO(); // WEEK2-interrupt
   uint32_t beg_tick = get_tick();
-  while(get_tick() - beg_tick <= ticks){
+  while (get_tick() - beg_tick <= ticks) {
     // sti(); hlt(); cli(); // chage to me in WEEK2-interrupt
-    proc_yield(); // change to me in WEEK4-process-api
-    // thread_yield();
+    proc_yield();  // change to me in WEEK4-process-api
+                   // thread_yield();
   }
   return;
 }
 
-int sys_exec(const char *path, char *const argv[]) {
-  // TODO(); // WEEK2-interrupt, WEEK3-virtual-memory
-  // DEFAULT
-  // printf("sys_exec is not implemented yet.");
-  // while(1);
-  PD *pgdir = vm_alloc();
-  if (pgdir == NULL) {
+int sys_exec(const char* path, char* const argv[]) {
+  // WEEK7: 线程相关
+  PD* pg_new = vm_alloc();
+  if (pg_new == NULL) {
     return -1;
   }
-  proc_t *proc = proc_curr();
-  if (load_user(pgdir, proc->ctx, path, argv) != 0) {
-    kfree(pgdir);
+  proc_t* proc = proc_curr();
+  proc_t* leader = proc->group_leader;
+  if (load_user(pg_new, leader->ctx, path, argv) != 0) {
+    vm_teardown(pg_new);
     return -1;
   }
 
-  proc->pgdir = pgdir;           // 更新当前进程的页目录
-  set_cr3(pgdir);       // 设置 CR3 寄存器为新页目录
-  
-  set_tss(KSEL(SEG_KDATA), (uint32_t)proc->kstack + PGSIZE);
-  irq_iret(proc->ctx);
-  return 0;
+  PD* pg_old = leader->pgdir;
+  leader->pgdir = pg_new;  // 更新当前进程的页目录
+  set_cr3(pg_new);         // 设置 CR3 寄存器为新页目录
+  set_tss(KSEL(SEG_KDATA), (uint32_t)leader->kstack + PGSIZE);
+  vm_teardown(pg_old);
+
+  proc_t* thread = leader->thread_group;
+  while (thread != NULL) {
+    thread_free(thread);
+    thread = thread->thread_group;
+  }
+
+  leader->thread_group = NULL;
+  leader->thread_num = 1;
+  proc_run(leader);
+
+  // Default
+  printf("sys_exec is not implemented yet.");
+  while (1)
+    ;
 }
 
 int sys_getpid() {
   // TODO(); // WEEK3-virtual-memory
-  proc_t *current_proc = proc_curr();
-  return current_proc->pid;
+  proc_t* current_proc = proc_curr();
+  return current_proc->tgid;
 }
 
 int sys_gettid() {
-  TODO(); // Lab2-1
+  // TODO(); // Lab2-1
+  proc_t* current_proc = proc_curr();
+  return current_proc->pid;
 }
 
 void sys_yield() {
@@ -106,7 +121,7 @@ void sys_yield() {
 
 int sys_fork() {
   // TODO(); // WEEK4-process-api
-  proc_t *child_pcb = proc_alloc();
+  proc_t* child_pcb = proc_alloc();
   if (child_pcb == NULL) {
     return -1;
   }
@@ -116,58 +131,109 @@ int sys_fork() {
 }
 
 void sys_exit(int status) {
-  TODO();
+  // TODO();
+  proc_t* curr_thread = proc_curr();  // 获取当前线程
+
+  if (curr_thread->pid == curr_thread->tgid) {
+    // 当前线程是主线程
+    while (curr_thread->thread_num > 1) {
+      proc_yield();
+    }
+    assert(curr_thread->thread_num == 1);
+    proc_t* thread;
+    thread = curr_thread->thread_group;
+    while (thread != NULL) {
+      proc_t* next_thread = thread->thread_group;
+      thread_free(thread);
+      thread = next_thread;
+    }
+
+    proc_makezombie(curr_thread, status);
+  } else {
+    // 当前线程是普通线程
+    if (curr_thread->detached == 1) {
+      // 删除控制块
+      proc_t* thread = curr_thread->group_leader;
+      while (thread != NULL) {
+        if (thread->thread_group == curr_thread) {
+          thread->thread_group = curr_thread->thread_group;
+          break;
+        }
+        thread = thread->thread_group;
+      }
+      proc_set_kernel_parent(curr_thread);
+    }
+    proc_t* leader = curr_thread->group_leader;  // 获取主线程
+    leader->thread_num--;                        // 主线程的线程数量减1
+    proc_makezombie(curr_thread, status);        // 将当前线程标记为 ZOMBIE
+  }
+  INT(0x81);
 }
 
 void sys_exit_group(int status) {
   // TODO();
   // WEEK4 process api
-  proc_t *curr_proc = proc_curr();
+  proc_t* curr_proc = proc_curr();
+  // WEEK6 thread_free
+  proc_t* thread;
+  thread = curr_proc->thread_group;
+  while (thread != NULL) {
+    proc_t* next_thread = thread->thread_group;
+    thread_free(thread);
+    thread = next_thread;
+  }
+
   proc_makezombie(curr_proc, status);
   INT(0x81);
   assert(0);
 }
 
-int sys_wait(int *status) {
+int sys_wait(int* status) {
   // TODO(); // WEEK4 process api
-  proc_t *curr_proc = proc_curr();
+  proc_t* curr_proc = proc_curr();
+  proc_t* leader = curr_proc->group_leader;
 
-  if (curr_proc->child_num == 0) {
+  if (leader->child_num == 0) {
     return -1;
   }
 
-  sem_p(&curr_proc->zombie_sem);
-  proc_t *zombie_child = proc_findzombie(curr_proc);
-  
+  sem_p(&leader->zombie_sem);
+  proc_t* zombie_child = proc_findzombie(leader);
+  while (zombie_child == NULL) {
+    proc_yield();
+    zombie_child = proc_findzombie(leader);
+  }
   if (status != NULL) {
     *status = zombie_child->exit_code;
   }
   int pid = zombie_child->pid;
   proc_free(zombie_child);
 
-  curr_proc->child_num--;
+  leader->child_num--;
   return pid;
 }
 
 int sys_sem_open(int value) {
   // WEEK5-semaphore
-  proc_t *curr_proc = proc_curr();
-  int idx = proc_allocusem(curr_proc);
+  proc_t* curr_proc = proc_curr();
+  proc_t* leader = curr_proc->group_leader;
+  int idx = proc_allocusem(leader);
   if (idx == -1) {
     return -1;
   }
-  usem_t *user_sem = usem_alloc(value);
+  usem_t* user_sem = usem_alloc(value);
   if (user_sem == NULL) {
     return -1;
   }
-  curr_proc->usems[idx] = user_sem;
+  leader->usems[idx] = user_sem;
   return idx;
 }
 
 int sys_sem_p(int sem_id) {
   // WEEK5-semaphore
-  proc_t *curr_proc = proc_curr();
-  usem_t *user_sem = proc_getusem(curr_proc, sem_id);
+  proc_t* curr_proc = proc_curr();
+  proc_t* leader = curr_proc->group_leader;
+  usem_t* user_sem = proc_getusem(leader, sem_id);
   if (user_sem == NULL) {
     return -1;
   }
@@ -177,8 +243,9 @@ int sys_sem_p(int sem_id) {
 
 int sys_sem_v(int sem_id) {
   // WEEK5-semaphore
-  proc_t *curr_proc = proc_curr();
-  usem_t *user_sem = proc_getusem(curr_proc, sem_id);
+  proc_t* curr_proc = proc_curr();
+  proc_t* leader = curr_proc->group_leader;
+  usem_t* user_sem = proc_getusem(leader, sem_id);
   if (user_sem == NULL) {
     return -1;
   }
@@ -188,83 +255,158 @@ int sys_sem_v(int sem_id) {
 
 int sys_sem_close(int sem_id) {
   // WEEK5-semaphore
-  proc_t *curr_proc = proc_curr();
-  usem_t *user_sem = proc_getusem(curr_proc, sem_id);
+  proc_t* curr_proc = proc_curr();
+  proc_t* leader = curr_proc->group_leader;
+  usem_t* user_sem = proc_getusem(leader, sem_id);
   if (user_sem == NULL) {
     return -1;
   }
   usem_close(user_sem);
-  curr_proc->usems[sem_id] = NULL;
+  leader->usems[sem_id] = NULL;
   return 0;
 }
 
-int sys_open(const char *path, int mode) {
-  TODO(); // Lab3-1
+int sys_open(const char* path, int mode) {
+  TODO();  // Lab3-1
 }
 
 int sys_close(int fd) {
-  TODO(); // Lab3-1
+  TODO();  // Lab3-1
 }
 
 int sys_dup(int fd) {
-  TODO(); // Lab3-1
+  TODO();  // Lab3-1
 }
 
 uint32_t sys_lseek(int fd, uint32_t off, int whence) {
-  TODO(); // Lab3-1
+  TODO();  // Lab3-1
 }
 
-int sys_fstat(int fd, struct stat *st) {
-  TODO(); // Lab3-1
+int sys_fstat(int fd, struct stat* st) {
+  TODO();  // Lab3-1
 }
 
-int sys_chdir(const char *path) {
-  TODO(); // Lab3-2
+int sys_chdir(const char* path) {
+  TODO();  // Lab3-2
 }
 
-int sys_unlink(const char *path) {
+int sys_unlink(const char* path) {
   return iremove(path);
 }
 
 // optional syscall
 
-void *sys_mmap() {
+void* sys_mmap() {
   // TODO();
   // proc_t *proc = proc_curr(); // 获取当前进程
   for (size_t mmap_va = USR_MEM; mmap_va < VIR_MEM; mmap_va += PGSIZE) {
     // 检查该虚拟地址是否已经被占用
-    if (vm_walkpte(vm_curr()/*proc->pgdir*/, mmap_va, 0) == NULL) {
+    if (vm_walkpte(vm_curr() /*proc->pgdir*/, mmap_va, 0) == NULL) {
       // 找到了空的虚拟页, 现在为该虚拟页分配物理内存
-      void *new_page = kalloc(); // 分配一页物理内存
+      void* new_page = kalloc();  // 分配一页物理内存
       if (new_page == NULL) {
-        return NULL; // 分配失败，返回 NULL
+        return NULL;  // 分配失败，返回 NULL
       }
-      vm_map(vm_curr()/*proc->pgdir*/, mmap_va, PGSIZE, 7);
-      return (void *)mmap_va;
+      vm_map(vm_curr() /*proc->pgdir*/, mmap_va, PGSIZE, 7);
+      return (void*)mmap_va;
     }
   }
   return NULL;
 }
 
-void sys_munmap(void *addr) {
+void sys_munmap(void* addr) {
   // TODO();
-  vm_unmap(vm_curr()/*proc_curr()->pgdir*/, (size_t)addr, PGSIZE);
+  vm_unmap(vm_curr() /*proc_curr()->pgdir*/, (size_t)addr, PGSIZE);
 }
 
-int sys_clone(int (*entry)(void*), void *stack, void *arg, void (*ret_entry)(void)){
-  TODO();
+int sys_clone(int (*entry)(void*), void* stack, void* arg, void (*ret_entry)(void)) {
+  // 获取当前进程的组长进程
+  proc_t* proc = proc_curr()->group_leader;
+
+  // 分配新的进程
+  proc_t* new_proc = proc_alloc();
+  if (new_proc == NULL) {
+    return -1;
+  }
+
+  // 设置tgid和group_leader
+  new_proc->tgid = proc->tgid;
+  new_proc->group_leader = proc;
+
+  // 维护线程链表
+  new_proc->thread_group = proc->thread_group;
+  proc->thread_group = new_proc;
+
+  // 普通线程的父进程设置为 NULL
+  if (new_proc->pid != new_proc->tgid) {
+    new_proc->parent = NULL;
+  }
+
+  // 增加线程数
+  proc->thread_num++;
+
+  // 使用主进程的页表
+  new_proc->pgdir = proc->pgdir;
+
+  // 设置用户栈
+  uint32_t* stack_top = (uint32_t*)stack;
+  stack_top--;
+  *stack_top = (uint32_t)arg;
+  stack_top--;
+  *stack_top = (uint32_t)ret_entry;
+
+  // 设置上下文
+  new_proc->ctx->eip = (uint32_t)entry;
+  new_proc->ctx->esp = (uint32_t)stack_top;
+  new_proc->ctx->cs = USEL(SEG_UCODE);
+  new_proc->ctx->ds = USEL(SEG_UDATA);
+  new_proc->ctx->ss = USEL(SEG_UDATA);
+  new_proc->ctx->eflags = 0x202;
+
+  // 将新进程加入就绪队列
+  proc_addready(new_proc);
+
+  return new_proc->pid;
 }
 
-int sys_join(int tid, void **retval) {
-  TODO();
+int sys_join(int tid, void** retval) {
+  proc_t* cur_thread = proc_curr();
+  proc_t* target_thread = pid2proc(tid);
+  if (cur_thread->pid == target_thread->pid) {
+    return 3;  // 自己join自己，返回ESRCH
+  }
+
+  if (target_thread->joinable == 0) {
+    return 3;  // 目标线程不可以被join
+  }
+  target_thread->joinable = 0;  // 设置为不可再被join
+  sem_p(&target_thread->join_sem);
+  if (retval != NULL) {
+    *retval = (void*)target_thread->exit_code;
+  }
+  return 0;
 }
 
 int sys_detach(int tid) {
-  TODO();
+  return thread_detach(tid);
 }
 
 int sys_kill(int pid) {
-  TODO();
+  // WEEK7: 杀死进程控制块
+  proc_t* proc = pid2proc(pid);
+  if (proc == NULL || proc->pid != proc->tgid) {
+    return -1;
+  }
+  proc_t* thread = proc->thread_group;
+  while (thread != NULL) {
+    thread_free(thread);
+    thread = thread->thread_group;
+  }
+  proc_makezombie(proc, 9);
+  if (proc == proc_curr()) {
+    INT(0x81);
+  }
+  return 0;
 }
 
 int sys_cv_open() {
@@ -278,8 +420,8 @@ int sys_cv_wait(int cv_id, int sem_id) {
 }
 
 int sys_cv_sig(int cv_id) {
-  proc_t *cur_proc = proc_curr();
-  usem_t *cur_usem = proc_getusem(cur_proc, cv_id);
+  proc_t* cur_proc = proc_curr();
+  usem_t* cur_usem = proc_getusem(cur_proc, cv_id);
   if (cur_usem == NULL) {
     return -1;
   }
@@ -290,8 +432,8 @@ int sys_cv_sig(int cv_id) {
 }
 
 int sys_cv_sigall(int cv_id) {
-  proc_t *cur_proc = proc_curr();
-  usem_t *cur_usem = proc_getusem(cur_proc, cv_id);
+  proc_t* cur_proc = proc_curr();
+  usem_t* cur_usem = proc_getusem(cur_proc, cv_id);
   if (cur_usem == NULL) {
     return -1;
   }
@@ -309,59 +451,59 @@ int sys_pipe(int fd[2]) {
   TODO();
 }
 
-int sys_mkfifo(const char *path, int mode){
+int sys_mkfifo(const char* path, int mode) {
   TODO();
 }
 
-int sys_link(const char *oldpath, const char *newpath) {
+int sys_link(const char* oldpath, const char* newpath) {
   TODO();
 }
 
-int sys_symlink(const char *oldpath, const char *newpath) {
+int sys_symlink(const char* oldpath, const char* newpath) {
   TODO();
 }
 
-void *syscall_handle[NR_SYS] = {
-  [SYS_write] = sys_write,
-  [SYS_read] = sys_read,
-  [SYS_brk] = sys_brk,
-  [SYS_sleep] = sys_sleep,
-  [SYS_exec] = sys_exec,
-  [SYS_getpid] = sys_getpid,
-  [SYS_gettid] = sys_gettid,
-  [SYS_yield] = sys_yield,
-  [SYS_fork] = sys_fork,
-  [SYS_exit] = sys_exit,
-  [SYS_exit_group] = sys_exit_group,
-  [SYS_wait] = sys_wait,
-  [SYS_sem_open] = sys_sem_open,
-  [SYS_sem_p] = sys_sem_p,
-  [SYS_sem_v] = sys_sem_v,
-  [SYS_sem_close] = sys_sem_close,
-  [SYS_open] = sys_open,
-  [SYS_close] = sys_close,
-  [SYS_dup] = sys_dup,
-  [SYS_lseek] = sys_lseek,
-  [SYS_fstat] = sys_fstat,
-  [SYS_chdir] = sys_chdir,
-  [SYS_unlink] = sys_unlink,
-  [SYS_mmap] = sys_mmap,
-  [SYS_munmap] = sys_munmap,
-  [SYS_clone] = sys_clone,
-  [SYS_join] = sys_join,
-  [SYS_detach] = sys_detach,
-  [SYS_kill] = sys_kill,
-  [SYS_cv_open] = sys_cv_open,
-  [SYS_cv_wait] = sys_cv_wait,
-  [SYS_cv_sig] = sys_cv_sig,
-  [SYS_cv_sigall] = sys_cv_sigall,
-  [SYS_cv_close] = sys_cv_close,
-  [SYS_pipe] = sys_pipe,
-  [SYS_mkfifo] = sys_mkfifo,
-  [SYS_link] = sys_link,
-  [SYS_symlink] = sys_symlink,
-  // [SYS_spinlock_open] = sys_spinlock_open,
-  // [SYS_spinlock_acquire] = sys_spinlock_acquire,
-  // [SYS_spinlock_release] = sys_spinlock_release,
-  // [SYS_spinlock_close] = sys_spinlock_close,
+void* syscall_handle[NR_SYS] = {
+    [SYS_write] = sys_write,
+    [SYS_read] = sys_read,
+    [SYS_brk] = sys_brk,
+    [SYS_sleep] = sys_sleep,
+    [SYS_exec] = sys_exec,
+    [SYS_getpid] = sys_getpid,
+    [SYS_gettid] = sys_gettid,
+    [SYS_yield] = sys_yield,
+    [SYS_fork] = sys_fork,
+    [SYS_exit] = sys_exit,
+    [SYS_exit_group] = sys_exit_group,
+    [SYS_wait] = sys_wait,
+    [SYS_sem_open] = sys_sem_open,
+    [SYS_sem_p] = sys_sem_p,
+    [SYS_sem_v] = sys_sem_v,
+    [SYS_sem_close] = sys_sem_close,
+    [SYS_open] = sys_open,
+    [SYS_close] = sys_close,
+    [SYS_dup] = sys_dup,
+    [SYS_lseek] = sys_lseek,
+    [SYS_fstat] = sys_fstat,
+    [SYS_chdir] = sys_chdir,
+    [SYS_unlink] = sys_unlink,
+    [SYS_mmap] = sys_mmap,
+    [SYS_munmap] = sys_munmap,
+    [SYS_clone] = sys_clone,
+    [SYS_join] = sys_join,
+    [SYS_detach] = sys_detach,
+    [SYS_kill] = sys_kill,
+    [SYS_cv_open] = sys_cv_open,
+    [SYS_cv_wait] = sys_cv_wait,
+    [SYS_cv_sig] = sys_cv_sig,
+    [SYS_cv_sigall] = sys_cv_sigall,
+    [SYS_cv_close] = sys_cv_close,
+    [SYS_pipe] = sys_pipe,
+    [SYS_mkfifo] = sys_mkfifo,
+    [SYS_link] = sys_link,
+    [SYS_symlink] = sys_symlink,
+    // [SYS_spinlock_open] = sys_spinlock_open,
+    // [SYS_spinlock_acquire] = sys_spinlock_acquire,
+    // [SYS_spinlock_release] = sys_spinlock_release,
+    // [SYS_spinlock_close] = sys_spinlock_close,
 };
