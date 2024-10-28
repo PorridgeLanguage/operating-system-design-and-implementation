@@ -37,6 +37,13 @@ void init_proc() {
   pcb[0].joinable = 1;
   pcb[0].detached = 0;
   sem_init(&(pcb[0].join_sem), 0);
+
+  // 初始化信号相关变量
+  pcb[0].sigblocked = 0;
+  for (int i = 0; i < SIGNAL_NUM; i++) {
+    pcb[0].sigaction[i] = handle_signal;
+  }
+  list_init(&pcb[0].sigpending_queue);
 }
 
 proc_t* proc_alloc() {
@@ -69,6 +76,13 @@ proc_t* proc_alloc() {
       pcb[i].joinable = 1;
       pcb[i].detached = 0;
       sem_init(&(pcb[i].join_sem), 0);
+
+      // 初始化信号相关变量
+      pcb[i].sigblocked = 0;
+      for (int j = 0; j < SIGNAL_NUM; j++) {
+        pcb[i].sigaction[j] = handle_signal;
+      }
+      list_init(&pcb[i].sigpending_queue);
       // 返回新分配的进程控制块
       return &pcb[i];
     }
@@ -86,6 +100,14 @@ void proc_free(proc_t* proc) {
   proc->ctx = NULL;
   proc->pid = -1;
   proc->brk = 0;
+
+  // 回收信号相关变量
+  list_t* current = proc->sigpending_queue.next;
+  while (current != &proc->sigpending_queue) {
+    list_t* next = current->next;
+    list_remove(&proc->sigpending_queue, current);
+    current = next;
+  }
 }
 
 proc_t* proc_curr() {
@@ -98,6 +120,7 @@ void proc_run(proc_t* proc) {
   curr = proc;
   set_cr3(proc->pgdir);
   set_tss(KSEL(SEG_KDATA), (uint32_t)STACK_TOP(proc->kstack));
+  do_signal(proc);  // 信号处理
   irq_iret(proc->ctx);
 }
 
@@ -230,6 +253,13 @@ void thread_free(proc_t* thread) {
   if (thread == NULL) {
     return;
   }
+  // 回收信号相关变量
+  list_t* current = thread->sigpending_queue.next;
+  while (current != &thread->sigpending_queue) {
+    list_t* next = current->next;
+    list_remove(&thread->sigpending_queue, current);
+    current = next;
+  }
   memset(thread, 0, sizeof(proc_t));
 }
 
@@ -256,4 +286,76 @@ proc_t* pid2proc(int pid) {
     }
   }
   return NULL;
+}
+
+// WEEK8-signal
+void do_signal(proc_t* proc) {
+  list_t* current = proc->sigpending_queue.next;
+
+  // 遍历sigpending_queue
+  while (current != &proc->sigpending_queue) {
+    int signo = (int)(intptr_t)current->ptr;  // 从链表节点中获取信号编号
+
+    // 检查信号是否被阻塞
+    if (!(proc->sigblocked & (1 << signo))) {  // 如果信号没有被阻塞
+      // 调用对应的信号处理函数
+      if (proc->sigaction[signo] != NULL) {
+        proc->sigaction[signo](signo, proc);
+      }
+
+      // 从sigpending_queue中移除该信号
+      list_remove(&proc->sigpending_queue, current);
+      break;  // 每次只处理一个信号
+    }
+
+    current = current->next;  // 继续下一个信号
+  }
+}
+
+void handle_signal(int signo, proc_t* proc) {
+  // WEEK8-signal
+  assert(signo >= 0 && signo < SIGNAL_NUM);
+  switch (signo) {
+    case SIGSTOP:
+      // Handle SIGHUP logic
+      proc->status = BLOCKED;
+      if (proc == curr) {
+        INT(0x81);  // 被停止的进程恰好现在正在运行，让出CPU
+      }
+      break;
+
+    case SIGCONT:
+      // TODO: Implement SIGCONT logic here
+      proc_addready(proc);
+      break;
+
+    case SIGKILL:
+      // Handle SIGKILL signal
+      if (proc == NULL || proc->pid != proc->tgid) {
+        return;
+      }
+      proc_t* thread = proc->thread_group;
+      while (thread != NULL) {
+        thread_free(thread);
+        thread = thread->thread_group;
+      }
+      proc_makezombie(proc, 9);
+      if (proc == proc_curr()) {
+        INT(0x81);
+      }
+      break;
+
+    case SIGUSR1:
+      printf("Signal SIGUSR1 in proc %d is not defined.\n", proc_curr()->tgid);
+      break;
+
+    case SIGUSR2:
+      printf("Signal SIGUSR2 in proc %d is not defined.\n", proc_curr()->tgid);
+      break;
+
+    default:
+      printf("Received an invalid signal number: %d\n", signo);
+      panic("Signal error");
+      break;
+  }
 }

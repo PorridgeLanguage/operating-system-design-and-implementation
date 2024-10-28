@@ -5,6 +5,7 @@
 #include "file.h"
 #include "klib.h"
 #include "sem.h"
+#include "signal.h"
 #include "vme.h"
 
 #define KSTACK_SIZE 4096
@@ -57,6 +58,11 @@ typedef struct proc {
   int detached;    // 指示该线程是否被detach了，初始化为0，代表默认是没有被detach的。
   sem_t join_sem;  // 维护join信息的信号量，初始化为value=0
 
+  // WEEK8-signal
+  int sigblocked;                                    // 整型数，以位图的形式指示信号是否被阻塞。
+  void (*sigaction[SIGNAL_NUM])(int, struct proc*);  // 函数指针数组，指示不同信号对应的处理函数。
+  list_t sigpending_queue;                           // 等待队列，维护收到但还没有来得及处理的信号。
+
   // file_t *files[MAX_UFILE]; // Lab3-1
   // inode_t *cwd; // Lab3-2
 } proc_t;
@@ -82,5 +88,9 @@ void thread_free(proc_t* thread);
 int thread_detach(int tid);
 void proc_set_kernel_parent(proc_t* proc);
 proc_t* pid2proc(int pid);
+
+// WEEK8-signal
+void do_signal(proc_t* proc);
+void handle_signal(int signo, proc_t* proc);
 
 #endif

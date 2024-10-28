@@ -391,20 +391,26 @@ int sys_detach(int tid) {
   return thread_detach(tid);
 }
 
-int sys_kill(int pid) {
-  // WEEK7: 杀死进程控制块
-  proc_t* proc = pid2proc(pid);
-  if (proc == NULL || proc->pid != proc->tgid) {
-    return -1;
+int sys_kill(int pid, int signo) {
+  proc_t* proc = pid2proc(pid);  // 得到指针控制块
+  if (proc == NULL) {
+    return 3;  // ESRCH: No such process
   }
-  proc_t* thread = proc->thread_group;
-  while (thread != NULL) {
-    thread_free(thread);
-    thread = thread->thread_group;
+  if (signo < 0 || signo >= SIGNAL_NUM) {
+    return 22;  // EINVAL: Invalid signal
   }
-  proc_makezombie(proc, 9);
-  if (proc == proc_curr()) {
-    INT(0x81);
+  if (signo == SIGSTOP || signo == SIGCONT || signo == SIGKILL) {
+    proc->sigaction[signo](signo, proc);
+  } else {  // 处理可以缓一缓的信号
+    // 检测sigpending_queue中是否已经有该信号量
+    list_t* current = proc->sigpending_queue.next;
+    while (current != &proc->sigpending_queue) {
+      if ((int)(uintptr_t)current->ptr == signo) {
+        return 0;  // 信号量已经挂起，直接返回
+      }
+      current = current->next;
+    }
+    list_enqueue(&proc->sigpending_queue, (void*)(uintptr_t)signo);
   }
   return 0;
 }
@@ -463,6 +469,41 @@ int sys_symlink(const char* oldpath, const char* newpath) {
   TODO();
 }
 
+int sys_sigaction(int signo, const void* act, void** oldact) {
+  // WEEK8-signal: set new signal action handler
+  if (signo < 0 || signo >= SIGNAL_NUM) {
+    return 22;  // EINVAL: Invalid signal
+  }
+  proc_t* curr_proc = proc_curr();
+  if (oldact != NULL) {
+    *oldact = curr_proc->sigaction[signo];
+  }
+  // 更新信号量处理函数
+  curr_proc->sigaction[signo] = (void (*)(int, proc_t*))act;
+  return 0;
+}
+
+int sys_sigprocmask(int how, const int set, int* oldset) {
+  // WEEK8-signal: set new signal action handler
+  proc_t* curr_proc = proc_curr();
+
+  if (oldset != NULL) {
+    // 保存处理前的信号屏蔽字
+    *oldset = curr_proc->sigblocked;
+  }
+  if (how == SIG_BLOCK) {
+    curr_proc->sigblocked |= set;  // Block the signals in 'set'
+  }
+  if (how == SIG_UNBLOCK) {
+    curr_proc->sigblocked &= ~set;  // Unblock the signals in 'set'
+  }
+  if (how == SIG_SETMASK) {
+    curr_proc->sigblocked = set;  // Set the mask to 'set'
+  }
+
+  return 0;
+}
+
 void* syscall_handle[NR_SYS] = {
     [SYS_write] = sys_write,
     [SYS_read] = sys_read,
@@ -502,6 +543,8 @@ void* syscall_handle[NR_SYS] = {
     [SYS_mkfifo] = sys_mkfifo,
     [SYS_link] = sys_link,
     [SYS_symlink] = sys_symlink,
+    [SYS_sigaction] = sys_sigaction,
+    [SYS_sigprocmask] = sys_sigprocmask
     // [SYS_spinlock_open] = sys_spinlock_open,
     // [SYS_spinlock_acquire] = sys_spinlock_acquire,
     // [SYS_spinlock_release] = sys_spinlock_release,

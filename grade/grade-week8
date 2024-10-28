@@ -1,0 +1,85 @@
+#!/usr/bin/env python3
+
+import os
+import re
+import subprocess
+from gradelib import *
+
+STOPS = [stop_on_line(".*failed.*"), 
+         stop_on_line(".*Abort @.*")]
+
+r = Runner(save("qemu.out"))
+
+@test(25, "killtest")
+def test_killtest():
+  s = """
+  $ killtest
+  ^Main process \(PID: [0-9]{1,2}\) starts running.
+  ^Process \(PID: [0-9]{1,2}\) is running and will try to kill itself...
+  ^Child process \(PID: [0-9]{1,2}\) waiting for kill...
+  ^Parent process \(PID: [0-9]{1,2}\) trying to kill child \(PID: [0-9]{1,2}\)
+  ^The child process \(PID: [0-9]{1,2}\) is killed
+  ^Child process \(PID: [0-9]{1,2}\) killed by signal
+  ^Main process \(PID: [0-9]{1,2}\) finished.
+  $ echo OK
+  OK
+  """
+  script, exps, isregs = parse_script(s)
+  r.run_qemu(*STOPS, shell_script(script))
+  r.match(*exps, isregs=isregs, continued=True)
+
+@test(25, "sigtest1")
+def test_sigtest1():
+  s = """
+  $ sigtest1
+  ^Main process \(PID: [0-9]{1,2}\) starts running.
+  ^Child process \(PID: [0-9]{1,2}\) is running...
+  ^Sent SIGSTOP to child \(PID: [0-9]{1,2}\).
+  ^Sent SIGCONT to child \(PID: [0-9]{1,2}\).
+  ^Child process \(PID: [0-9]{1,2}\) is exiting after running.
+  Child exited normally with status 0.
+  ^Main process \(PID: [0-9]{1,2}\) finished.
+  $ echo OK
+  OK
+  """
+  script, exps, isregs = parse_script(s)
+  r.run_qemu(*STOPS, shell_script(script))
+  r.match(*exps, isregs=isregs, continued=True)
+
+@test(25, "sigtest2")
+def test_sigtest2():
+  s = """
+  $ sigtest2
+  sigaction begins.
+  sigaction test passed.
+  $ echo OK
+  OK
+  """
+  script, exps, isregs = parse_script(s)
+  r.run_qemu(*STOPS, shell_script(script))
+  r.match(*exps, isregs=isregs, continued=True)
+
+@test(25, "sigtest3")
+def test_sigtest3():
+  s = """
+  $ sigtest3
+  Multi-thread signal test begins.
+  handle sigusr1
+  handle sigusr2
+  handle sigusr1
+  handle sigusr2
+  handle sigusr1
+  handle sigusr2
+  handle sigusr1
+  handle sigusr2
+  handle sigusr1
+  handle sigusr2
+  Multi-thread signal test passed.
+  $ echo OK
+  OK
+  """
+  script, exps, isregs = parse_script(s)
+  r.run_qemu(*STOPS, shell_script(script))
+  r.match(*exps, isregs=isregs, continued=True)
+
+run_tests()
