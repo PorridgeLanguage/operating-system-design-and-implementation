@@ -5,7 +5,7 @@ default: all
 .PHONY: clean clean-all clean-fs all qemu qemu-gdb gdb print-gdbport grade submit pack
 
 # REMEMBER TO MAKE CLEAN AFTER CHANGE ME!
-STAGE  := week8
+STAGE  := week9
 STAGES := week1 week2 week3 week4 week5 week6 week7 week8 week9 week10 week11 week12
 
 ifeq ($(filter $(STAGES), $(STAGE)), ) # STAGE must be valid
@@ -160,7 +160,7 @@ $(USER_ELFS): $(OBJDIR)/%: $(OBJDIR)/%.o $(USER_LIBOBJ) $(LIB_ARCH)
 	@echo LD "->" $@
 	@$(LD) $(LDFLAGS) -e _start -Ttext $(USER_ADDR) $< $(USER_LIBOBJ) $(LIB_ARCH) -o $@
 
-ifeq ($(STAGE), phase6)
+ifeq ($(filter week10 week11 week12 week13, $(STAGE)), $(STAGE))
 USER_GENC   := utils/mkfs.c
 USER_GEN    := $(OBJDIR)/utils/mkfs
 else
@@ -168,7 +168,7 @@ USER_GENC   := utils/genuser.c
 USER_GEN    := $(OBJDIR)/utils/genuser
 endif
 
-ifeq ($(filter phase5 phase6, $(STAGE)), $(STAGE))
+ifeq ($(filter week9 week10 week11 week12 week13, $(STAGE)), $(STAGE))
 USER_FILE   := $(shell find user/file -type f)
 endif
 

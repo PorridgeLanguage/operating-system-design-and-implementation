@@ -44,6 +44,11 @@ void init_proc() {
     pcb[0].sigaction[i] = handle_signal;
   }
   list_init(&pcb[0].sigpending_queue);
+
+  // 初始化用户打开文件表
+  for (int i = 0; i < MAX_UFILE; i++) {
+    pcb[0].files[i] = NULL;
+  }
 }
 
 proc_t* proc_alloc() {
@@ -83,6 +88,12 @@ proc_t* proc_alloc() {
         pcb[i].sigaction[j] = handle_signal;
       }
       list_init(&pcb[i].sigpending_queue);
+
+      // 初始化用户打开文件表
+      for (int j = 0; j < MAX_UFILE; j++) {
+        pcb[i].files[j] = NULL;
+      }
+
       // 返回新分配的进程控制块
       return &pcb[i];
     }
@@ -156,6 +167,15 @@ void proc_copycurr(proc_t* proc) {
       proc->usems[i] = usem_dup(leader->usems[i]);
     }
   }
+
+  // WEEK9-files: copy user files
+  for (int i = 0; i < MAX_UFILE; i++) {
+    if (leader->files[i] != NULL) {
+      proc->group_leader->files[i] = fdup(leader->files[i]);
+    } else {
+      proc->group_leader->files[i] = NULL;
+    }
+  }
   // Lab3-1: dup opened files
   // Lab3-2: dup cwd
   // TODO();
@@ -183,6 +203,17 @@ void proc_makezombie(proc_t* proc, int exitcode) {
   }
   // WEEK7: 释放join_sem
   sem_v(&proc->join_sem);
+
+  // WEEK9: colse user files
+  if (proc->pid == proc->tgid) {
+    // 主进程关闭，Maybe wrong
+    for (int i = 0; i < MAX_UFILE; i++) {
+      if (proc->files[i] != NULL) {
+        fclose(proc->files[i]);
+      }
+    }
+  }
+
   // Lab3-1: close opened files
   // Lab3-2: close cwd
   // TODO();
@@ -226,12 +257,20 @@ usem_t* proc_getusem(proc_t* proc, int sem_id) {
 
 int proc_allocfile(proc_t* proc) {
   // Lab3-1: find a free slot in proc->files, return its index, or -1 if none
-  TODO();
+  for (int i = 0; i < MAX_UFILE; i++) {
+    if (proc->group_leader->files[i] == NULL) {
+      return i;
+    }
+  }
+  return -1;
 }
 
 file_t* proc_getfile(proc_t* proc, int fd) {
   // Lab3-1: return proc->files[fd], or NULL if fd out of bound
-  TODO();
+  if (fd < 0 || fd >= MAX_UFILE) {
+    return NULL;
+  }
+  return proc->group_leader->files[fd];
 }
 
 void schedule(Context* ctx) {

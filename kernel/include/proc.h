@@ -63,7 +63,7 @@ typedef struct proc {
   void (*sigaction[SIGNAL_NUM])(int, struct proc*);  // 函数指针数组，指示不同信号对应的处理函数。
   list_t sigpending_queue;                           // 等待队列，维护收到但还没有来得及处理的信号。
 
-  // file_t *files[MAX_UFILE]; // Lab3-1
+  file_t* files[MAX_UFILE];  // WEEK9-files
   // inode_t *cwd; // Lab3-2
 } proc_t;
 

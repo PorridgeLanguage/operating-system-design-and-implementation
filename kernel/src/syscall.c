@@ -31,12 +31,35 @@ void do_syscall(Context* ctx) {
 
 int sys_write(int fd, const void* buf, size_t count) {
   // TODO: rewrite me at Lab3-1
-  return serial_write(buf, count);
+  // printf("WRITE\n");
+  proc_t* cur_proc = proc_curr();
+  if (cur_proc == NULL) {
+    return -1;
+  }
+  cur_proc = cur_proc->group_leader;
+  file_t* cur_file = proc_getfile(cur_proc, fd);
+  // printf("FILE ADDRESS: %x\n", cur_file);
+  if (cur_file == NULL) {
+    return -1;
+  }
+
+  return fwrite(cur_file, buf, count);
+  // return serial_write(buf, count);
 }
 
 int sys_read(int fd, void* buf, size_t count) {
   // TODO: rewrite me at Lab3-1
-  return serial_read(buf, count);
+  proc_t* cur_proc = proc_curr();
+  if (cur_proc == NULL) {
+    return -1;
+  }
+  cur_proc = cur_proc->group_leader;
+  file_t* cur_file = proc_getfile(cur_proc, fd);
+  if (cur_file == NULL) {
+    return -1;
+  }
+  return fread(cur_file, buf, count);
+  // return serial_read(buf, count);
 }
 
 int sys_brk(void* addr) {
@@ -267,23 +290,87 @@ int sys_sem_close(int sem_id) {
 }
 
 int sys_open(const char* path, int mode) {
-  TODO();  // Lab3-1
+  proc_t* cur_proc = proc_curr();
+  if (cur_proc == NULL) {
+    return -1;
+  }
+  cur_proc = cur_proc->group_leader;
+  int fd = proc_allocfile(cur_proc);
+  if (fd != -1) {
+    file_t* cur_file = fopen(path, mode);
+    if (cur_file == NULL) {
+      return -1;
+    }
+    cur_proc->files[fd] = cur_file;
+    return fd;
+  }
+  return -1;
 }
 
 int sys_close(int fd) {
-  TODO();  // Lab3-1
+  proc_t* cur_proc = proc_curr();
+  if (cur_proc == NULL) {
+    return -1;
+  }
+  cur_proc = cur_proc->group_leader;
+  file_t* cur_file = proc_getfile(cur_proc, fd);
+  if (cur_file == NULL) {
+    return -1;
+  }
+  fclose(cur_file);
+  cur_proc->files[fd] = NULL;
+  return 0;
 }
 
 int sys_dup(int fd) {
-  TODO();  // Lab3-1
+  proc_t* cur_proc = proc_curr()->group_leader;
+  int new_fd = proc_allocfile(cur_proc);
+  if (new_fd == -1) {
+    return -1;
+  }
+  file_t* cur_file = proc_getfile(cur_proc, fd);
+  if (cur_file == NULL) {
+    return -1;
+  }
+  cur_proc->files[new_fd] = cur_file;
+  fdup(cur_proc->files[new_fd]);
+  return new_fd;
 }
 
 uint32_t sys_lseek(int fd, uint32_t off, int whence) {
-  TODO();  // Lab3-1
+  proc_t* cur_proc = proc_curr();
+  if (cur_proc == NULL) {
+    return -1;
+  }
+  cur_proc = cur_proc->group_leader;
+  file_t* cur_file = proc_getfile(cur_proc, fd);
+  if (cur_file == NULL) {
+    return -1;
+  }
+  return fseek(cur_file, off, whence);
 }
 
 int sys_fstat(int fd, struct stat* st) {
-  TODO();  // Lab3-1
+  proc_t* cur_proc = proc_curr();
+  if (cur_proc == NULL) {
+    return -1;
+  }
+  cur_proc = cur_proc->group_leader;
+  file_t* cur_file = proc_getfile(cur_proc, fd);
+  if (cur_file == NULL) {
+    return -1;
+  }
+  if (cur_file->type == TYPE_FILE) {
+    st->type = itype(cur_file->inode);
+    st->size = isize(cur_file->inode);
+    st->node = ino(cur_file->inode);
+  }
+  if (cur_file->type == TYPE_DEV) {
+    st->type = TYPE_DEV;
+    st->size = 0;
+    st->node = 0;
+  }
+  return 0;
 }
 
 int sys_chdir(const char* path) {
