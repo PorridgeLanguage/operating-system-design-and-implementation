@@ -64,7 +64,7 @@ typedef struct proc {
   list_t sigpending_queue;                           // 等待队列，维护收到但还没有来得及处理的信号。
 
   file_t* files[MAX_UFILE];  // WEEK9-files
-  // inode_t *cwd; // Lab3-2
+  inode_t* cwd;              // Lab3-2
 } proc_t;
 
 void init_proc();

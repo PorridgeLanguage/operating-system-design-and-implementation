@@ -85,6 +85,9 @@ char* strtok(char* __restrict s, const char* __restrict delim);
 // kernel file_t don't and needn't distingush between file and dir
 #define TYPE_DIR 2
 #define TYPE_DEV 3
+#define TYPE_PIPE 4
+#define TYPE_FIFO 5
+#define TYPE_SYMLINK 6
 
 // open mode
 #define O_RDONLY 0x000
