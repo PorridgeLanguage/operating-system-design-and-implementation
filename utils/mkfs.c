@@ -181,12 +181,23 @@ blk_t* iwalk(dinode_t* file, uint32_t blk_no) {
   // return the pointer to the file's data's blk_no th block, if no, alloc it
   if (blk_no < NDIRECT) {
     // direct address
-    TODO();
+    if (!file->addrs[blk_no]) {
+      file->addrs[blk_no] = balloc();
+    }
+    return bget(file->addrs[blk_no]);
   }
   blk_no -= NDIRECT;
   if (blk_no < NINDIRECT) {
     // indirect address
-    TODO();
+    if (!file->addrs[NDIRECT]) {
+      file->addrs[NDIRECT] = balloc();
+    }
+    // 打开间接块
+    blk_t* indirect_block = bget(file->addrs[NDIRECT]);
+    if (indirect_block->u32buf[blk_no] == NULL) {
+      indirect_block->u32buf[blk_no] = balloc();
+    }
+    return bget(indirect_block->u32buf[blk_no]);
   }
   panic("file too big");
 }
@@ -194,7 +205,16 @@ blk_t* iwalk(dinode_t* file, uint32_t blk_no) {
 void iappend(dinode_t* file, const void* buf, uint32_t size) {
   // append buf to file's data, remember to add file->size
   // you can append block by block
-  TODO();
+  while (size > 0) {
+    uint32_t idx = file->size / BLK_SIZE;                                // 要写的逻辑块在文件索引里是第idx项
+    blk_t* blk = iwalk(file, idx);                                       // 得到对应逻辑块
+    uint32_t off = file->size % BLK_SIZE;                                // 要写的字节的开始位于逻辑块的偏移量
+    uint32_t count = size > (BLK_SIZE - off) ? (BLK_SIZE - off) : size;  // 最多能写的量
+    memcpy(blk->u8buf[off], buf, count);
+    file->size += count;
+    buf += count;
+    size -= count;
+  }
 }
 
 void add_file(char* path) {
@@ -211,6 +231,10 @@ void add_file(char* path) {
   strcpy(dirent.name, basename(path));
   iappend(root, &dirent, sizeof dirent);
   // write the file's data, first read it to buf then call iappend
-  TODO();
+  size_t bytes_read = fread(buf, 1, BLK_SIZE, fp);
+  while (bytes_read > 0) {
+    iappend(inode, buf, bytes_read);
+    bytes_read = fread(buf, 1, BLK_SIZE, fp);
+  }
   fclose(fp);
 }
