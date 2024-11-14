@@ -194,7 +194,7 @@ blk_t* iwalk(dinode_t* file, uint32_t blk_no) {
     }
     // 打开间接块
     blk_t* indirect_block = bget(file->addrs[NDIRECT]);
-    if (indirect_block->u32buf[blk_no] == NULL) {
+    if (indirect_block->u32buf[blk_no] == 0) {
       indirect_block->u32buf[blk_no] = balloc();
     }
     return bget(indirect_block->u32buf[blk_no]);
@@ -210,7 +210,7 @@ void iappend(dinode_t* file, const void* buf, uint32_t size) {
     blk_t* blk = iwalk(file, idx);                                       // 得到对应逻辑块
     uint32_t off = file->size % BLK_SIZE;                                // 要写的字节的开始位于逻辑块的偏移量
     uint32_t count = size > (BLK_SIZE - off) ? (BLK_SIZE - off) : size;  // 最多能写的量
-    memcpy(blk->u8buf[off], buf, count);
+    memcpy(&blk->u8buf[off], buf, count);
     file->size += count;
     buf += count;
     size -= count;

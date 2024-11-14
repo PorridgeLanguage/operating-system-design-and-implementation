@@ -27,6 +27,7 @@ int main() {
 void init_user_and_go() {
   proc_t* proc = proc_alloc();
   assert(proc);
+  proc->cwd = iopen("/", TYPE_NONE);
   char* argv[] = {"sh", NULL};
   assert(load_user(proc->pgdir, proc->ctx, "sh", argv) == 0);
   proc_addready(proc);

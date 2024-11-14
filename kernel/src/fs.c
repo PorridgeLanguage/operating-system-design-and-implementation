@@ -203,7 +203,7 @@ static uint32_t balloc() {
     bread(&byte, 4, sb.bitmap, i * 4);
     if (byte != 0xffffffff) {
       for (int j = 0; j < 32; j++) {
-        if (byte & (1 << j) == 0) {
+        if ((byte & (1 << j)) == 0) {
           uint32_t free_id = 32 * i + j;
           bzero(free_id);
           byte = byte | (1 << j);
@@ -250,7 +250,7 @@ static inode_t* iget(uint32_t no) {
         if (open_dinodes[j].no == 0 || open_dinodes[j].no == no) {
           open_dinodes[j].no = no;
           inodes[i].dinode = &open_dinodes[j].dinode;
-          diread(&inodes[i].dinode, no);
+          diread(inodes[i].dinode, no);
           return &inodes[i];
         }
       }
@@ -263,7 +263,7 @@ static inode_t* iget(uint32_t no) {
 static void iupdate(inode_t* inode) {
   // Lab3-2: sync the inode->dinode to disk
   // call me EVERYTIME after you edit inode->dinode
-  diwrite(&inode->dinode, inode->no);
+  diwrite(inode->dinode, inode->no);
 }
 
 // Copy the next path element from path into name.
@@ -432,7 +432,7 @@ static uint32_t iwalk(inode_t* inode, uint32_t no) {
   no -= NDIRECT;
   if (no < NINDIRECT) {
     // indirect address
-    if (inode->dinode->addrs[NDIRECT] == NULL) {
+    if (inode->dinode->addrs[NDIRECT] == 0) {
       inode->dinode->addrs[NDIRECT] = balloc();
       iupdate(inode);
     }
@@ -460,15 +460,16 @@ int iread(inode_t* inode, uint32_t off, void* buf, uint32_t len) {
     len = end_off - off;
   }
 
-  while (off < end_off) {
+  while (len > 0 && off < end_off) {
     uint32_t blkno;
     uint32_t blk_offset = off % BLK_SIZE;
     uint32_t bytes_left = end_off - off;
     uint32_t blk_space_left = BLK_SIZE - blk_offset;
     uint32_t bytes_to_read = bytes_left < blk_space_left ? bytes_left : blk_space_left;
 
-    blkno = iwalk(inode, off < BLK_SIZE);
+    blkno = iwalk(inode, off / BLK_SIZE);
     bread(buf, bytes_to_read, blkno, blk_offset);
+    len -= bytes_to_read;
     off += bytes_to_read;
     buf += bytes_to_read;
     total_read += bytes_to_read;
@@ -508,6 +509,7 @@ int iwrite(inode_t* inode, uint32_t off, const void* buf, uint32_t len) {
     buf += bytes_to_write;
     total_witten += bytes_to_write;
   }
+  iupdate(inode);
   return total_witten;
 }
 
@@ -612,26 +614,26 @@ int iremove(const char* path) {
   inode_t* parent_inode;
   uint32_t off;
 
-  // 1. 获取文件的父目录和文件名
+  // 获取文件的父目录和文件名
   parent_inode = iopen_parent(path, name);  // 使用iopen_parent获取父目录并存储文件名
   if (parent_inode == NULL) {
     return -1;  // 没有找到父目录
   }
 
-  // 2. 不允许删除 . 和 .. 文件
-  if (strcmp(name, ".") == 0 || strcmp(name, "..") == 0) {
+  // 不允许删除 . 和 .. 文件
+  if (!(strcmp(name, ".") && strcmp(name, ".."))) {
     iclose(parent_inode);  // 关闭父目录
     return -1;             // 不允许删除 . 或 .. 文件
   }
 
-  // 3. 查找文件并确保其存在
+  // 查找文件并确保其存在
   inode_t* inode = ilookup(parent_inode, name, &off, TYPE_NONE);
   if (inode == NULL) {
     iclose(parent_inode);  // 关闭父目录
     return -1;             // 文件不存在
   }
 
-  // 4. 如果文件是目录，检查目录是否为空
+  // 如果文件是目录，检查目录是否为空
   if (inode->dinode->type == TYPE_DIR) {
     if (idirempty(inode) == 0) {
       iclose(parent_inode);  // 关闭父目录
@@ -639,20 +641,13 @@ int iremove(const char* path) {
       return -1;             // 目录非空，不能删除
     }
   }
-
-  // 5. 清空目录项
+  inode->del = 1;  // 将 inode 的 del 标记设置为 1，表示删除
+  // 清空目录项
   dirent_t dirent;
   memset(&dirent, 0, sizeof(dirent));                  // 清空目录项内容
   iwrite(parent_inode, off, &dirent, sizeof(dirent));  // 写回父目录
 
-  // 6. 标记 inode 为已删除，但不删除
-  inode->del = 1;  // 将 inode 的 del 标记设置为 1，表示删除
-  iupdate(inode);  // 更新 inode
-
-  iclose(parent_inode);  // 关闭父目录
-  iclose(inode);         // 关闭文件
-
-  return 0;  // 删除成功
+  return 0;
 }
 
 #endif

@@ -374,7 +374,21 @@ int sys_fstat(int fd, struct stat* st) {
 }
 
 int sys_chdir(const char* path) {
-  TODO();  // Lab3-2
+  // Lab3-2
+  inode_t* cur_dir = iopen(path, TYPE_NONE);
+  if (cur_dir == NULL) {
+    return -1;
+  }
+  if (itype(cur_dir) != TYPE_DIR) {
+    iclose(cur_dir);
+    return -1;
+  }
+  proc_t* cur_proc = proc_curr();
+  if (cur_proc->cwd != NULL) {
+    iclose(cur_proc->cwd);
+  }
+  cur_proc->cwd = cur_dir;
+  return 0;
 }
 
 int sys_unlink(const char* path) {
@@ -403,7 +417,7 @@ void* sys_mmap() {
 
 void sys_munmap(void* addr) {
   // TODO();
-  vm_unmap(vm_curr() /*proc_curr()->pgdir*/, (size_t)addr, PGSIZE);
+  vm_unmap(vm_curr(), (size_t)addr, PGSIZE);
 }
 
 int sys_clone(int (*entry)(void*), void* stack, void* arg, void (*ret_entry)(void)) {

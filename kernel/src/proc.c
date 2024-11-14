@@ -49,6 +49,8 @@ void init_proc() {
   for (int i = 0; i < MAX_UFILE; i++) {
     pcb[0].files[i] = NULL;
   }
+  // 要设置内核进程pcb[0]的cwd为根目录
+  pcb[0].cwd = iopen("/", TYPE_NONE);
 }
 
 proc_t* proc_alloc() {
@@ -93,7 +95,7 @@ proc_t* proc_alloc() {
       for (int j = 0; j < MAX_UFILE; j++) {
         pcb[i].files[j] = NULL;
       }
-
+      pcb[i].cwd = NULL;
       // 返回新分配的进程控制块
       return &pcb[i];
     }
@@ -168,7 +170,7 @@ void proc_copycurr(proc_t* proc) {
     }
   }
 
-  // WEEK9-files: copy user files
+  // WEEK9: dup opened files
   for (int i = 0; i < MAX_UFILE; i++) {
     if (leader->files[i] != NULL) {
       proc->group_leader->files[i] = fdup(leader->files[i]);
@@ -176,9 +178,12 @@ void proc_copycurr(proc_t* proc) {
       proc->group_leader->files[i] = NULL;
     }
   }
-  // Lab3-1: dup opened files
   // Lab3-2: dup cwd
-  // TODO();
+  if (leader->cwd != NULL) {
+    proc->cwd = idup(leader->cwd);
+  } else {
+    proc->cwd = NULL;
+  }
 }
 
 void proc_makezombie(proc_t* proc, int exitcode) {
@@ -204,7 +209,7 @@ void proc_makezombie(proc_t* proc, int exitcode) {
   // WEEK7: 释放join_sem
   sem_v(&proc->join_sem);
 
-  // WEEK9: colse user files
+  // WEEK9: close opened files
   if (proc->pid == proc->tgid) {
     // 主进程关闭，Maybe wrong
     for (int i = 0; i < MAX_UFILE; i++) {
@@ -213,10 +218,12 @@ void proc_makezombie(proc_t* proc, int exitcode) {
       }
     }
   }
-
-  // Lab3-1: close opened files
-  // Lab3-2: close cwd
-  // TODO();
+  // WEEK10: close cwd
+  if (proc->pid == proc->tgid && proc->cwd != NULL) {
+    iclose(proc->cwd);
+  } else {
+    proc->cwd = NULL;
+  }
 }
 
 proc_t* proc_findzombie(proc_t* proc) {
