@@ -1,0 +1,377 @@
+#!/usr/bin/env python3
+
+import os
+import re
+import subprocess
+import shutil
+from gradelib import *
+
+r = Runner(save("qemu.out"))
+
+def backup_fs(f):
+  def func():
+    shutil.copyfile("build/os.img", "build/os.backup")
+    try:
+      f()
+    finally:
+      shutil.copyfile("build/os.backup", "build/os.img")
+  func.__name__ = f.__name__
+  return func
+
+""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+### link
+
+@test(7, "linktest1")
+@backup_fs
+def test_linktest1():
+  s = """
+  $ linktest1
+  Content read from testfile_link.txt:
+  This is a test content for the original file.
+  Hard link test passed successfully.
+  $ echo OK
+  OK
+  """
+  script, exps, isregs = parse_script(s)
+  r.run_qemu(stop_on_line(".*Abort @.*"), shell_script(script))
+  r.match(*exps, isregs=isregs, continued=True)
+
+@test(7, "linktest2")
+@backup_fs
+def test_linktest2():
+  s = """
+  $ linktest2
+  Hard link consistency test begins.
+  Content read from testfile_link_consistency.txt after writing to testfile_consistency.txt:
+  Initial content.
+  New content added.
+  Hard link consistency test ends.
+  $ echo OK
+  OK
+  """
+  script, exps, isregs = parse_script(s)
+  r.run_qemu(stop_on_line(".*Abort @.*"), shell_script(script))
+  r.match(*exps, isregs=isregs, continued=True)
+
+@test(7, "linktest3")
+@backup_fs
+def test_linktest3():
+  s = """
+  $ linktest3
+  Hard link delete test begins.
+  Content read from testfile_link_delete.txt after testfile_delete.txt was deleted:
+  This content will be used to test deletion.
+  Hard link delete test ends.
+  $ echo OK
+  OK
+  """
+  script, exps, isregs = parse_script(s)
+  r.run_qemu(stop_on_line(".*Abort @.*"), shell_script(script))
+  r.match(*exps, isregs=isregs, continued=True)
+  
+@test(4, "sh_linktest")
+@backup_fs
+def test_sh_linktest():
+    s = """
+    $ echo This is a test file. > original.txt
+    $ cat original.txt
+    This is a test file.
+    $ ln original.txt link.txt
+    $ cat link.txt
+    This is a test file.
+    $ echo Additional content >> link.txt
+    $ cat link.txt
+    This is a test file.
+    Additional content
+    $ cat original.txt
+    This is a test file.
+    Additional content
+    $ rm original.txt
+    $ cat link.txt
+    This is a test file.
+    Additional content
+    $ rm link.txt
+    $ echo OK
+    OK
+    """
+    script, exps, isregs = parse_script(s)
+    r.run_qemu(stop_on_line(".*Abort @.*"), shell_script(script))
+    r.match(*exps, isregs=isregs, continued=True)
+  
+""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+### symlink
+
+@test(7, "symlinktest1")
+@backup_fs
+def test_symlinktest1():
+  s = """
+  $ symlinktest1
+  symlinktest begins.
+  Content of symlink.txt: Hello, this is a test file.
+  symlinktest ends.
+  $ echo OK
+  OK
+  """
+  script, exps, isregs = parse_script(s)
+  r.run_qemu(stop_on_line(".*Abort @.*"), shell_script(script))
+  r.match(*exps, isregs=isregs, continued=True)
+  
+@test(7, "symlinktest2")
+@backup_fs
+def test_symlinktest2():
+  s = """
+  $ symlinktest2
+  symlink loop test begins.
+  Error: Detected a symlink loop when trying to open symlink1.txt
+  symlink loop test ends.
+  $ echo OK
+  OK
+  """
+  script, exps, isregs = parse_script(s)
+  r.run_qemu(stop_on_line(".*Abort @.*"), shell_script(script))
+  r.match(*exps, isregs=isregs, continued=True)
+
+@test(4, "sh_symlinktest")
+@backup_fs
+def test_sh_symlinktest():
+    s = """
+    $ echo Soft link test content > target.txt
+    $ cat target.txt
+    Soft link test content
+    $ ln -s target.txt symlink.txt
+    $ cat symlink.txt
+    Soft link test content
+    $ echo More content >> symlink.txt
+    $ cat symlink.txt
+    Soft link test content
+    More content
+    $ cat target.txt
+    Soft link test content
+    More content
+    $ rm target.txt
+    $ cat symlink.txt
+    cat: cannot open symlink.txt
+    $ echo New content > target.txt
+    $ cat symlink.txt
+    New content
+    $ rm symlink.txt
+    $ echo OK
+    OK
+    """
+    script, exps, isregs = parse_script(s)
+    r.run_qemu(stop_on_line(".*Abort @.*"), shell_script(script))
+    r.match(*exps, isregs=isregs, continued=True)
+
+""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+### pipe
+
+@test(7, "pipetest")
+@backup_fs
+def test_pipetest():
+  s = """
+  $ pipetest
+  pipetest begins.
+  pipetest passed.
+  $ echo OK
+  OK
+  """
+  script, exps, isregs = parse_script(s)
+  r.run_qemu(stop_on_line(".*Abort @.*"), shell_script(script))
+  r.match(*exps, isregs=isregs, continued=True)
+    
+@test(7, "pipe_multi")
+@backup_fs
+def test_pipe_multi():
+  s = """
+  $ pipe_multi
+  pipe multiple read/write test begins.
+  pipe multiple read/write test passed.
+  $ echo OK
+  OK
+  """
+  script, exps, isregs = parse_script(s)
+  r.run_qemu(stop_on_line(".*Abort @.*"), shell_script(script))
+  r.match(*exps, isregs=isregs, continued=True)
+  
+@test(7, "pipe_largewrite1")
+@backup_fs
+def test_pipe_largewrite1():
+  s = """
+  $ pipe_largewrite1
+  pipe large write test 1 begins.
+  pipe large write test 1 passed.
+  $ echo OK
+  OK
+  """
+  script, exps, isregs = parse_script(s)
+  r.run_qemu(stop_on_line(".*Abort @.*"), shell_script(script))
+  r.match(*exps, isregs=isregs, continued=True)
+  
+@test(7, "pipe_largewrite2")
+@backup_fs
+def test_pipe_largewrite2():
+  s = """
+  $ pipe_largewrite2
+  pipe large write test 2 begins.
+  pipe large write test 2 passed.
+  $ echo OK
+  OK
+  """
+  script, exps, isregs = parse_script(s)
+  r.run_qemu(stop_on_line(".*Abort @.*"), shell_script(script))
+  r.match(*exps, isregs=isregs, continued=True)
+  
+@test(4, "sh_pipetest")
+@backup_fs
+def test_sh_pipetest():
+    s = """
+    $ cat words.txt | grep hello
+    hello world
+    $ cat sortfile.txt | sort      
+    apple is a fruit.
+    bananas are yellow.
+    cats are independent animals.
+    dogs are loyal companions.
+    elephants are the largest land animals.
+    frogs can live both in water and on land.
+    giraffes have long necks.
+    horses are strong animals.
+    igloos are shelters made of ice.
+    jellyfish live in the ocean.
+    kangaroos are native to Australia.
+    lions are considered the king of the jungle.
+    monkeys are known for their intelligence.
+    nightingales are birds that sing beautifully.
+    owls are nocturnal birds.
+    penguins cannot fly but are excellent swimmers.
+    quails are small birds.
+    rabbits are fast and reproduce quickly.
+    snakes can slither silently.
+    tigers are powerful predators.
+    umbrellas protect us from rain.
+    vultures feed on carrion.
+    wolves hunt in packs.
+    xylophones are musical instruments.
+    yaks are used as pack animals in some regions.
+    zebras have black and white stripes.
+    $ cat sortfile.txt | sort | grep are
+    bananas are yellow.
+    cats are independent animals.
+    dogs are loyal companions.
+    elephants are the largest land animals.
+    horses are strong animals.
+    igloos are shelters made of ice.
+    kangaroos are native to Australia.
+    lions are considered the king of the jungle.
+    monkeys are known for their intelligence.
+    nightingales are birds that sing beautifully.
+    owls are nocturnal birds.
+    penguins cannot fly but are excellent swimmers.
+    quails are small birds.
+    rabbits are fast and reproduce quickly.
+    tigers are powerful predators.
+    xylophones are musical instruments.
+    yaks are used as pack animals in some regions.
+    $ echo OK
+    OK
+    """
+    script, exps, isregs = parse_script(s)
+    r.run_qemu(stop_on_line(".*Abort @.*"), shell_script(script))
+    r.match(*exps, isregs=isregs, continued=True)
+
+""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+### fifo
+
+@test(7, "fifotest1")
+@backup_fs
+def test_fifotest1():
+  s = """
+  $ fifotest1
+  fifotest begins.
+  Reader received: Hello from writer process!
+  fifotest ends.
+  $ echo OK
+  OK
+  """
+  script, exps, isregs = parse_script(s)
+  r.run_qemu(stop_on_line(".*Abort @.*"), shell_script(script))
+  r.match(*exps, isregs=isregs, continued=True)
+
+@test(7, "fifotest2")
+@backup_fs
+def test_fifotest2():
+  s = """
+  $ fifotest2
+  fifo large write test begins.
+  fifo large write test passed.
+  $ echo OK
+  OK
+  """
+  script, exps, isregs = parse_script(s)
+  r.run_qemu(stop_on_line(".*Abort @.*"), shell_script(script))
+  r.match(*exps, isregs=isregs, continued=True)
+  
+@test(7, "fifotest3")
+@backup_fs
+def test_fifotest3():
+  s = """
+  $ fifotest3
+  FIFO speed test begins.
+  Writer sent all messages successfully.
+  Reader received all messages in correct order.
+  FIFO speed test ends.
+  $ echo OK
+  OK
+  """
+  script, exps, isregs = parse_script(s)
+  r.run_qemu(stop_on_line(".*Abort @.*"), shell_script(script))
+  r.match(*exps, isregs=isregs, continued=True)
+
+@test(4, "sh_fifotest")
+@backup_fs
+def test_sh_fifotest():
+    s = """
+    $ mkfifo myfifo
+    $ echo FIFO test message > myfifo 
+    $ cat < myfifo
+    FIFO test message
+    $ echo Another message > myfifo 
+    $ cat < myfifo
+    Another message
+    $ echo Writing more to FIFO > myfifo 
+    $ echo Reading more from FIFO > myfifo 
+    $ cat < myfifo
+    Writing more to FIFO
+    Reading more from FIFO
+    $ rm myfifo
+    $ ls myfifo
+    ls: cannot open myfifo
+    $ mkfifo myfifo
+    $ echo OK
+    OK
+    """
+    script, exps, isregs = parse_script(s)
+    r.run_qemu(stop_on_line(".*Abort @.*"), shell_script(script))
+    r.match(*exps, isregs=isregs, continued=True)
+    s = """
+    $ mkfifo myfifo
+    Error: failed to create FIFO myfifo
+    $ echo Another message > myfifo 
+    $ cat < myfifo
+    Another message
+    $ echo Writing more to FIFO > myfifo 
+    $ echo Reading more from FIFO > myfifo 
+    $ cat < myfifo
+    Writing more to FIFO
+    Reading more from FIFO
+    $ rm myfifo
+    $ ls myfifo
+    ls: cannot open myfifo
+    $ echo OK
+    OK
+    """
+    script, exps, isregs = parse_script(s)
+    r.run_qemu(stop_on_line(".*Abort @.*"), shell_script(script))
+    r.match(*exps, isregs=isregs, continued=True)
+
+run_tests()
