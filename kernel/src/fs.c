@@ -369,7 +369,7 @@ static inode_t* iopen_parent(const char* path, char* name) {
   if (path[0] == '/') {
     ip = iget(sb.root);
   } else {
-    ip = idup(proc_curr()->cwd);
+    ip = idup(proc_curr()->group_leader->cwd);
   }
   assert(ip);
   while ((path = skipelem(path, name))) {

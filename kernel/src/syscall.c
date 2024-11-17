@@ -76,6 +76,8 @@ int sys_brk(void* addr) {
   } else if (new_brk < brk) {
     // can just do nothing
     // recover memory, Lab 1 extend
+    vm_unmap(proc->pgdir, new_brk, brk - new_brk);
+    proc_curr()->brk = new_brk;
   }
   return 0;
 }
@@ -384,10 +386,11 @@ int sys_chdir(const char* path) {
     return -1;
   }
   proc_t* cur_proc = proc_curr();
-  if (cur_proc->cwd != NULL) {
-    iclose(cur_proc->cwd);
+  proc_t* leader = cur_proc->group_leader;
+  if (leader->cwd != NULL) {
+    iclose(leader->cwd);
   }
-  cur_proc->cwd = cur_dir;
+  leader->cwd = cur_dir;
   return 0;
 }
 
