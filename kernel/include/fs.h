@@ -21,6 +21,7 @@ uint32_t ino(inode_t* inode);
 int idevid(inode_t* inode);
 void iadddev(const char* name, int id);
 int iremove(const char* path);
+inode_t* ilink(const char* path, inode_t* old_inode);
 
 #ifdef EASY_FS
 

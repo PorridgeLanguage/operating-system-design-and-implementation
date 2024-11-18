@@ -566,7 +566,7 @@ int sys_mkfifo(const char* path, int mode) {
 }
 
 int sys_link(const char* oldpath, const char* newpath) {
-  TODO();
+  return flink(oldpath, newpath);
 }
 
 int sys_symlink(const char* oldpath, const char* newpath) {

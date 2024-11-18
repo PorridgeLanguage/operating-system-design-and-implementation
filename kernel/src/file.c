@@ -162,3 +162,17 @@ void fclose(file_t* file) {
     iclose(file->inode);
   }
 }
+
+int flink(const char* oldpath, const char* newpath) {
+  inode_t* old_inode = iopen(oldpath, TYPE_NONE);
+  if (!old_inode) {
+    return -1;
+  }
+
+  if (ilink(newpath, old_inode) == NULL) {
+    iclose(old_inode);
+    return -1;
+  }
+  iclose(old_inode);
+  return 0;
+}

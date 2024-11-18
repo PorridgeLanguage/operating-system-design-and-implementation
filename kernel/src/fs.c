@@ -181,6 +181,7 @@ static uint32_t dialloc(int type) {
     diread(&dinode, i);
     if (dinode.type == TYPE_NONE) {
       dinode.type = type;
+      dinode.link_count = 1;
       diwrite(&dinode, i);
       return i;
     }
@@ -641,13 +642,80 @@ int iremove(const char* path) {
       return -1;             // 目录非空，不能删除
     }
   }
-  inode->del = 1;  // 将 inode 的 del 标记设置为 1，表示删除
-  // 清空目录项
-  dirent_t dirent;
-  memset(&dirent, 0, sizeof(dirent));                  // 清空目录项内容
-  iwrite(parent_inode, off, &dirent, sizeof(dirent));  // 写回父目录
+
+  // diwrite(&dinode, inode->no);
+  if (inode->dinode->link_count > 0) {
+    inode->dinode->link_count--;
+  }
+  if (inode->dinode->link_count == 0) {
+    inode->del = 1;  // 将 inode 的 del 标记设置为 1，表示删除
+
+    // 清空目录项
+    dirent_t dirent;
+    memset(&dirent, 0, sizeof(dirent));                  // 清空目录项内容
+    iwrite(parent_inode, off, &dirent, sizeof(dirent));  // 写回父目录
+  }
 
   return 0;
+}
+
+static inode_t* iget_link(uint32_t no, dinode_t* dinode) {
+  for (int i = 0; i < INODE_NUM; i++) {
+    if (inodes[i].no == no) {
+      inodes[i].ref++;
+      return &inodes[i];
+    }
+  }
+  for (int i = 0; i < INODE_NUM; i++) {
+    if (inodes[i].ref == 0) {
+      inodes[i].no = no;
+      inodes[i].ref = 1;
+      inodes[i].del = 0;
+      inodes[i].dinode = dinode;
+      return &inodes[i];
+    }
+  }
+  assert(0);  // 如果没有空槽位，直接终止
+  return NULL;
+}
+
+inode_t* ilink(const char* path, inode_t* old_inode) {
+  dirent_t dirent;
+  char name[MAX_NAME + 1];
+
+  // 打开父目录并解析目标文件名
+  inode_t* parent = iopen_parent(path, name);
+  if (parent == NULL || parent->dinode->type != TYPE_DIR) {
+    return NULL;  // 如果路径非法或父目录不存在，返回 NULL
+  }
+
+  uint32_t offset = 0;
+  // 遍历父目录，寻找空的目录项或检测重名冲突
+  uint32_t size = parent->dinode->size;
+  for (uint32_t i = 0; i < size; i += sizeof dirent) {
+    iread(parent, i, &dirent, sizeof dirent);
+    if (dirent.inode != 0 && strcmp(dirent.name, name) == 0) {
+      return NULL;  // 文件名已存在，返回 NULL
+    }
+    if (dirent.inode == 0 && offset == 0) {
+      offset = i;  // 记录空目录项的位置
+    }
+  }
+  if (offset == 0) {
+    offset = size;
+  }
+  old_inode->dinode->link_count++;
+
+  inode_t* new_inode = iget_link(dialloc(TYPE_FILE), old_inode->dinode);
+
+  // 初始化新的目录项
+  strcpy(dirent.name, name);
+  dirent.inode = new_inode->no;
+
+  // 将目录项写入父目录
+  iwrite(parent, offset, &dirent, sizeof(dirent));
+
+  return new_inode;
 }
 
 #endif
