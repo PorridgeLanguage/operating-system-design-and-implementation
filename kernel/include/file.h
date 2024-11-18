@@ -18,12 +18,13 @@ typedef struct file {
   dev_t* dev_op;
 } file_t;
 
-file_t* fopen(const char* path, int mode);
+file_t* fopen(const char* path, int mode, int depth);
 int fread(file_t* file, void* buf, uint32_t size);
 int fwrite(file_t* file, const void* buf, uint32_t size);
 uint32_t fseek(file_t* file, uint32_t off, int whence);
 file_t* fdup(file_t* file);
 void fclose(file_t* file);
 int flink(const char* oldpath, const char* newpath);
+int fsymlink(const char* oldpath, const char* newpath);
 
 #endif

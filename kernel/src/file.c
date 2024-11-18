@@ -19,7 +19,10 @@ static file_t* falloc() {
   return NULL;
 }
 
-file_t* fopen(const char* path, int mode) {
+file_t* fopen(const char* path, int mode, int depth) {
+  if (depth > 40) {
+    return NULL;
+  }
   file_t* fp = falloc();
   inode_t* ip = NULL;
   if (!fp)
@@ -64,6 +67,16 @@ file_t* fopen(const char* path, int mode) {
     fp->dev_op = dev_get(idevid(ip));
     iclose(ip);
     ip = NULL;
+  } else if (type == TYPE_SYMLINK) {
+    char buffer[MAX_NAME + 1] = {0};
+    if (iread(ip, 0, buffer, MAX_NAME + 1) < 0)
+      goto bad;
+
+    iclose(ip);
+    ip = NULL;
+
+    // 递归打开符号链接指向的文件
+    return fopen(buffer, mode, depth + 1);
   } else
     assert(0);
   fp->readable = !(mode & O_WRONLY);
@@ -175,4 +188,32 @@ int flink(const char* oldpath, const char* newpath) {
   }
   iclose(old_inode);
   return 0;
+}
+
+int fsymlink(const char* oldpath, const char* newpath) {
+  // 检查 newpath 是否已经存在
+  inode_t* new_inode = iopen(newpath, TYPE_NONE);
+  if (new_inode) {
+    iclose(new_inode);
+    return -1;  // newpath 已经存在
+  }
+
+  // 创建 newpath 文件
+  new_inode = iopen(newpath, TYPE_SYMLINK);
+  if (!new_inode) {
+    return -1;  // 创建失败
+  }
+
+  // 准备写入的路径内容
+  char buffer[MAX_NAME + 1] = {0};  // 全部初始化为 0
+  strncpy(buffer, oldpath, MAX_NAME);
+
+  // 将路径写入符号链接文件
+  if (iwrite(new_inode, 0, buffer, MAX_NAME + 1) < 0) {
+    iclose(new_inode);
+    return -1;  // 写入失败
+  }
+
+  iclose(new_inode);
+  return 0;  // 成功
 }

@@ -299,7 +299,7 @@ int sys_open(const char* path, int mode) {
   cur_proc = cur_proc->group_leader;
   int fd = proc_allocfile(cur_proc);
   if (fd != -1) {
-    file_t* cur_file = fopen(path, mode);
+    file_t* cur_file = fopen(path, mode, 0);
     if (cur_file == NULL) {
       return -1;
     }
@@ -570,7 +570,7 @@ int sys_link(const char* oldpath, const char* newpath) {
 }
 
 int sys_symlink(const char* oldpath, const char* newpath) {
-  TODO();
+  return fsymlink(oldpath, newpath);
 }
 
 int sys_sigaction(int signo, const void* act, void** oldact) {
