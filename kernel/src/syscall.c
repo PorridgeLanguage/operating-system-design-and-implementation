@@ -372,6 +372,11 @@ int sys_fstat(int fd, struct stat* st) {
     st->size = 0;
     st->node = 0;
   }
+  if (cur_file->type == TYPE_PIPE) {
+    st->type = TYPE_PIPE;
+    st->size = 0;
+    st->node = 0;
+  }
   return 0;
 }
 
@@ -558,7 +563,29 @@ int sys_cv_close(int cv_id) {
 }
 
 int sys_pipe(int fd[2]) {
-  TODO();
+  proc_t* cur_proc = proc_curr();
+  if (!fd)
+    return -1;
+  file_t* pipe_files[2];
+  if (pipe_open(pipe_files) < 0) {
+    return -1;
+  }
+  int fd_read = proc_allocfile(cur_proc);
+  if (fd_read >= 0) {
+    cur_proc->group_leader->files[fd_read] = pipe_files[0];
+  } else {
+    return -1;
+  }
+  int fd_write = proc_allocfile(cur_proc);
+  if (fd_write >= 0) {
+    cur_proc->group_leader->files[fd_write] = pipe_files[1];
+  } else {
+    cur_proc->group_leader->files[fd_read] = NULL;
+    return -1;
+  }
+  fd[0] = fd_read;
+  fd[1] = fd_write;
+  return 0;
 }
 
 int sys_mkfifo(const char* path, int mode) {

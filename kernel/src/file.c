@@ -123,6 +123,9 @@ int fread(file_t* file, void* buf, uint32_t size) {
     // 设备文件
     offset = file->dev_op->read(buf, size);
   }
+  if (file->type == TYPE_PIPE) {
+    offset += pipe_read(file, buf, size);
+  }
   return offset;
 }
 
@@ -141,6 +144,9 @@ int fwrite(file_t* file, const void* buf, uint32_t size) {
   }
   if (file->type == TYPE_DEV) {  // 是设备文件
     offset = file->dev_op->write(buf, size);
+  }
+  if (file->type == TYPE_PIPE) {
+    offset += pipe_write(file, buf, size);
   }
   return offset;
 }
@@ -173,6 +179,30 @@ void fclose(file_t* file) {
   file->ref--;
   if (file->ref == 0 && file->type == TYPE_FILE) {
     iclose(file->inode);
+  }
+  if (file->type == TYPE_PIPE) {
+    pipe_t* pipe = file->pipe;
+
+    // 使用信号量保护对管道状态的修改
+    sem_p(&pipe->mutex);
+
+    if (file->readable) {
+      pipe->read_open = 0;   // 关闭读口
+      sem_v(&pipe->cv_buf);  // 唤醒可能在等待写缓冲的线程
+    }
+    if (file->writable) {
+      pipe->write_open = 0;  // 关闭写口
+      sem_v(&pipe->cv_buf);  // 唤醒可能在等待读缓冲的线程
+    }
+
+    // 如果读口和写口都关闭，释放管道资源
+    if (pipe->read_open == 0 && pipe->write_open == 0) {
+      sem_v(&pipe->mutex);  // 释放信号量
+      pipe_close(pipe);     // 释放管道资源
+      return;
+    }
+
+    sem_v(&pipe->mutex);  // 释放信号量
   }
 }
 
@@ -216,4 +246,170 @@ int fsymlink(const char* oldpath, const char* newpath) {
 
   iclose(new_inode);
   return 0;  // 成功
+}
+
+#define TOTAL_PIPE 32
+
+static pipe_t pipes[TOTAL_PIPE];
+
+static pipe_t* pipe_alloc() {
+  // 找到一个空的管道并返回
+  for (int i = 0; i < TOTAL_PIPE; i++) {
+    if (pipes[i].read_open == 0 && pipes[i].write_open == 0) {
+      return &pipes[i];
+    }
+  }
+  return NULL;
+}
+
+void pipe_init(pipe_t* pipe) {
+  // 初始化分配的管道
+  pipe->read_pos = 0;
+  pipe->write_pos = 0;
+
+  pipe->read_open = 1;
+  pipe->write_open = 1;
+
+  pipe->empty = PIPE_SIZE;
+  pipe->full = 0;
+
+  sem_init(&pipe->mutex, 1);
+  sem_init(&pipe->cv_buf, 0);
+
+  memset(pipe->buffer, 0, PIPE_SIZE);  // 清空缓冲区
+  pipe->no = 0;
+}
+
+int pipe_open(file_t* pipe_files[2]) {
+  // TODO: WEEK11-link-pipe
+  pipe_t* pipe = pipe_alloc();
+  if (!pipe)
+    return -1;
+
+  // alloc read_side and write_side
+  file_t* read_side = falloc();
+  file_t* write_side = falloc();
+  if (!read_side || !write_side) {
+    if (read_side)
+      fclose(read_side);
+    if (write_side)
+      fclose(write_side);
+    return -1;
+  }
+  assert(read_side && write_side);
+
+  // 设置文件结构
+  read_side->type = TYPE_PIPE;
+  read_side->pipe = pipe;
+  read_side->inode = NULL;
+  read_side->dev_op = NULL;
+  read_side->readable = 1;
+  read_side->writable = 0;
+  read_side->offset = 0;
+  read_side->ref = 1;
+
+  write_side->type = TYPE_PIPE;
+  write_side->pipe = pipe;
+  write_side->inode = NULL;
+  write_side->dev_op = NULL;
+  write_side->readable = 0;
+  write_side->writable = 1;
+  write_side->offset = 0;
+  write_side->ref = 1;
+
+  // 初始化管道结构
+  pipe_init(pipe);
+
+  pipe_files[0] = read_side;
+  pipe_files[1] = write_side;
+
+  assert(pipe_files[0] && pipe_files[1]);
+
+  return 0;
+}
+
+void pipe_close(pipe_t* pipe) {
+  // TODO: WEEK11-link-pipe
+  assert(pipe);
+  pipe->read_open = 0;
+  pipe->write_open = 0;
+  memset(pipe->buffer, 0, PIPE_SIZE);
+}
+
+int pipe_write(file_t* file, const void* buf, uint32_t size) {
+  pipe_t* pipe = file->pipe;
+  const char* data = (const char*)buf;
+  uint32_t written = 0;
+  while (written < size) {
+    sem_p(&pipe->mutex);
+    // 写口关闭，返回错误
+    if (!pipe->write_open) {
+      sem_v(&pipe->mutex);
+      return -1;
+    }
+
+    // 管道空位不足，等待
+    while (pipe->empty == 0) {
+      if (!pipe->read_open) {  // 读口关闭
+        sem_v(&pipe->mutex);
+        return written;
+      }
+      sem_v(&pipe->mutex);
+      sem_p(&pipe->cv_buf);
+      sem_p(&pipe->mutex);
+    }
+    // 写入数据到管道
+    uint32_t writable = (size - written < pipe->empty) ? (size - written) : pipe->empty;
+    for (uint32_t i = 0; i < writable; i++) {
+      pipe->buffer[pipe->write_pos] = data[written++];
+      pipe->write_pos = (pipe->write_pos + 1) % PIPE_SIZE;
+    }
+    pipe->full += writable;
+    pipe->empty -= writable;
+
+    sem_v(&pipe->cv_buf);  // 通知可能的读操作
+    sem_v(&pipe->mutex);
+  }
+
+  return written;
+}
+
+int pipe_read(file_t* file, void* buf, uint32_t size) {
+  pipe_t* pipe = file->pipe;
+  char* data = (char*)buf;
+  uint32_t read = 0;
+
+  while (read < size) {
+    sem_p(&pipe->mutex);
+    // 读口关闭，返回错误
+    if (!pipe->read_open) {
+      sem_v(&pipe->mutex);
+      return -1;
+    }
+
+    // 管道为空，等待
+    while (pipe->full == 0) {
+      if (!pipe->write_open) {  // 写口关闭
+        sem_v(&pipe->mutex);
+        return read;
+      }
+      sem_v(&pipe->mutex);
+      sem_p(&pipe->cv_buf);
+      sem_p(&pipe->mutex);
+    }
+
+    // 从管道读取数据
+    uint32_t readable = (size - read < pipe->full) ? (size - read) : pipe->full;
+    for (uint32_t i = 0; i < readable; i++) {
+      data[read++] = pipe->buffer[pipe->read_pos];
+      pipe->read_pos = (pipe->read_pos + 1) % PIPE_SIZE;
+    }
+    pipe->full -= readable;
+    pipe->empty += readable;
+
+    sem_v(&pipe->cv_buf);  // 通知可能的写操作
+    sem_v(&pipe->mutex);
+  }
+
+  return read;
 }
