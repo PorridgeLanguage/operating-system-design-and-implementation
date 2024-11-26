@@ -2,6 +2,7 @@
 #include "file.h"
 #include "klib.h"
 #include "loader.h"
+#include "network/arp.h"
 #include "proc.h"
 #include "serial.h"
 #include "sysnum.h"
@@ -644,6 +645,28 @@ int sys_sigprocmask(int how, const int set, int* oldset) {
   return 0;
 }
 
+int sys_arp_create(char* interface, char* ipAddr, char* arpResp, size_t size) {
+  // TODO(); // WEEK12-network
+  assert(ipAddr);
+  if (send_arpRequest(interface, ipAddr, arpResp) < 0)
+    return -1;
+
+  return 0;
+}
+
+int sys_arp_serve(char* interface) {
+  // TODO(); // WEEK12-network
+  return recv_arpRequest(interface);
+}
+
+int sys_arp_receive(char* buff, size_t size) {
+  // TODO(); // WEEK12-network
+  int return_size = e1000_receive(buff, size);
+  if (return_size == 0)
+    return -1;
+  return return_size;
+}
+
 void* syscall_handle[NR_SYS] = {
     [SYS_write] = sys_write,
     [SYS_read] = sys_read,
@@ -684,9 +707,13 @@ void* syscall_handle[NR_SYS] = {
     [SYS_link] = sys_link,
     [SYS_symlink] = sys_symlink,
     [SYS_sigaction] = sys_sigaction,
-    [SYS_sigprocmask] = sys_sigprocmask
+    [SYS_sigprocmask] = sys_sigprocmask,
     // [SYS_spinlock_open] = sys_spinlock_open,
     // [SYS_spinlock_acquire] = sys_spinlock_acquire,
     // [SYS_spinlock_release] = sys_spinlock_release,
     // [SYS_spinlock_close] = sys_spinlock_close,
+    [SYS_arp_create] = sys_arp_create,
+    [SYS_arp_serve] = sys_arp_serve,
+    [SYS_arp_receive] = sys_arp_receive
+
 };

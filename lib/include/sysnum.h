@@ -47,6 +47,10 @@
 #define SYS_sigaction 42
 #define SYS_sigprocmask 43
 
-#define NR_SYS 44
+#define SYS_arp_create 44
+#define SYS_arp_serve 45
+#define SYS_arp_receive 46
+
+#define NR_SYS 47
 
 #endif

@@ -1,16 +1,16 @@
-#include "klib.h"
 #include "vme.h"
+#include "klib.h"
 #include "proc.h"
 
 static TSS32 tss;
 
 void init_gdt() {
   static SegDesc gdt[NR_SEG];
-  gdt[SEG_KCODE] = SEG32(STA_X | STA_R,   0,     0xffffffff, DPL_KERN);
-  gdt[SEG_KDATA] = SEG32(STA_W,           0,     0xffffffff, DPL_KERN);
-  gdt[SEG_UCODE] = SEG32(STA_X | STA_R,   0,     0xffffffff, DPL_USER);
-  gdt[SEG_UDATA] = SEG32(STA_W,           0,     0xffffffff, DPL_USER);
-  gdt[SEG_TSS]   = SEG16(STS_T32A,     &tss,  sizeof(tss)-1, DPL_KERN);
+  gdt[SEG_KCODE] = SEG32(STA_X | STA_R, 0, 0xffffffff, DPL_KERN);
+  gdt[SEG_KDATA] = SEG32(STA_W, 0, 0xffffffff, DPL_KERN);
+  gdt[SEG_UCODE] = SEG32(STA_X | STA_R, 0, 0xffffffff, DPL_USER);
+  gdt[SEG_UDATA] = SEG32(STA_W, 0, 0xffffffff, DPL_USER);
+  gdt[SEG_TSS] = SEG16(STS_T32A, &tss, sizeof(tss) - 1, DPL_KERN);
   set_gdt(gdt, sizeof(gdt[0]) * NR_SEG);
   set_tr(KSEL(SEG_TSS));
 }
@@ -28,12 +28,11 @@ static PT kpt[PHY_MEM / PT_SIZE] __attribute__((used));
 static size_t pm_ref[PHY_MEM / PGSIZE];
 
 typedef union free_page {
-    union free_page *next;
-    char buf[PGSIZE];
+  union free_page* next;
+  char buf[PGSIZE];
 } page_t;
 
-static page_t *free_page_list = NULL;
-
+static page_t* free_page_list = NULL;
 
 // WEEK3-virtual-memory
 
@@ -45,10 +44,9 @@ void init_page() {
   static_assert(sizeof(PT) == PGSIZE, "PT must be one page");
   static_assert(sizeof(PD) == PGSIZE, "PD must be one page");
 
-
   // WEEK3-virtual-memory: init kpd and kpt, identity mapping of [0 (or 4096), PHY_MEM)
   // TODO();
-  
+
   for (int i = 0; i < PHY_MEM / PT_SIZE; i++) {
     kpd.pde[i].val = MAKE_PDE(&kpt[i], 1);
     for (int j = 0; j < NR_PTE; j++) {
@@ -65,7 +63,7 @@ void init_page() {
   // TODO();
   free_page_list = (void*)KER_MEM;
   for (uint32_t addr = (size_t)free_page_list; addr < PHY_MEM; addr += PGSIZE) {
-    page_t *page = (page_t *)addr;
+    page_t* page = (page_t*)addr;
     page->next = free_page_list;
     free_page_list = page;
   }
@@ -74,16 +72,28 @@ void init_page() {
   for (size_t i = 0; i < PHY_MEM / PGSIZE; i++) {
     pm_ref[i] = 0;
   }
+
+  for (uint32_t addr = VIR_MEM; addr < MMIO_MEM; addr += PGSIZE) {
+    uint32_t dir_idx = ADDR2DIR(addr);
+    uint32_t tbl_idx = ADDR2TBL(addr);
+
+    if (!(kpd.pde[dir_idx].present)) {
+      kpd.pde[dir_idx].val = MAKE_PDE(kalloc(), PTE_W);
+      memset(PDE2PT(kpd.pde[dir_idx]), 0, PGSIZE);
+    }
+    PT* pt = PDE2PT(kpd.pde[dir_idx]);
+    pt->pte[tbl_idx].val = MAKE_PTE(addr, PTE_W);
+  }
 }
 
-void *kalloc() {
+void* kalloc() {
   // WEEK3-virtual-memory: alloc a page from kernel heap, abort when heap empty
   // TODO();
   if (free_page_list == NULL) {
     assert(0);
   }
 
-  page_t *page = free_page_list;
+  page_t* page = free_page_list;
 
   if (page->next == NULL) {
     return 0;
@@ -92,13 +102,13 @@ void *kalloc() {
   pm_ref[pg_index] = 1;
   free_page_list = free_page_list->next;
   memset(page, 0x0, PGSIZE);
-  
+
   return page;
 }
 
-void kfree(void *ptr) {
+void kfree(void* ptr) {
   // WEEK3-virtual-memory: free a page to kernel heap
-  
+
   // WEEK06
   size_t pg_index = (size_t)ptr / PGSIZE;
   // if (pm_ref[pg_index] > 0) {
@@ -106,17 +116,17 @@ void kfree(void *ptr) {
   // }
   pm_ref[pg_index] = pm_ref[pg_index] - 1;
   if (pm_ref[pg_index] == 0) {
-    page_t *page = (page_t *)ptr;
+    page_t* page = (page_t*)ptr;
     // memset(ptr, 0, PGSIZE);
     page->next = free_page_list;
     free_page_list = page;
   }
 }
 
-PD *vm_alloc() {
+PD* vm_alloc() {
   // WEEK3-virtual-memory: alloc a new pgdir, map memory under PHY_MEM identityly
   // TODO();
-  PD *pgdir = (PD *)kalloc();
+  PD* pgdir = (PD*)kalloc();
   if (pgdir == NULL) {
     return NULL;
   }
@@ -128,10 +138,26 @@ PD *vm_alloc() {
   for (int i = PHY_MEM / PT_SIZE; i < NR_PDE; i++) {
     pgdir->pde[i].val = 0;
   }
+
+  for (uint32_t addr = VIR_MEM; addr < MMIO_MEM; addr += PGSIZE) {
+    uint32_t dir_idx = ADDR2DIR(addr);
+    uint32_t tbl_idx = ADDR2TBL(addr);
+
+    if (!(pgdir->pde[dir_idx].present)) {
+      PT* new_pt = (PT*)kalloc();
+      if (new_pt == NULL) {
+        return NULL;  // 分配失败
+      }
+      memset(new_pt, 0, PGSIZE);  // 初始化页表为0
+      pgdir->pde[dir_idx].val = MAKE_PDE(new_pt, PTE_W | PTE_P);
+    }
+    PT* pt = PDE2PT(pgdir->pde[dir_idx]);
+    pt->pte[tbl_idx].val = MAKE_PTE(addr, PTE_W);
+  }
   return pgdir;
 }
 
-void vm_teardown(PD *pgdir) {
+void vm_teardown(PD* pgdir) {
   // WEEK3-virtual-memory: free all pages mapping above PHY_MEM in pgdir, then free itself
   // you can just do nothing :)
   // TODO();
@@ -152,11 +178,11 @@ void vm_teardown(PD *pgdir) {
   kfree(pgdir);
 }
 
-PD *vm_curr() {
+PD* vm_curr() {
   return (PD*)PAGE_DOWN(get_cr3());
 }
 
-PTE *vm_walkpte(PD *pgdir, size_t va, int prot) {
+PTE* vm_walkpte(PD* pgdir, size_t va, int prot) {
   // WEEK3-virtual-memory: return the pointer of PTE which match va
   // if not exist (PDE of va is empty) and prot&1, alloc PT and fill the PDE
   // if not exist (PDE of va is empty) and !(prot&1), return NULL
@@ -164,14 +190,14 @@ PTE *vm_walkpte(PD *pgdir, size_t va, int prot) {
   // TODO
   assert((prot & ~7) == 0);
   int pd_index = ADDR2DIR(va);
-  PDE *pde = &(pgdir->pde[pd_index]);
-  if(!pde->present){
-    if(prot&1){
-      PT *new_pt = (PT *)kalloc(); // alloc PT
+  PDE* pde = &(pgdir->pde[pd_index]);
+  if (!pde->present) {
+    if (prot & 1) {
+      PT* new_pt = (PT*)kalloc();  // alloc PT
       memset(new_pt, 0x00, PGSIZE);
-      pgdir->pde[pd_index].val |= MAKE_PDE(new_pt, prot); // let pde's prot |= prot
+      pgdir->pde[pd_index].val |= MAKE_PDE(new_pt, prot);  // let pde's prot |= prot
       int pt_index = ADDR2TBL(va);
-      PTE *pte = &(new_pt->pte[pt_index]);
+      PTE* pte = &(new_pt->pte[pt_index]);
       return pte;
     } else {
       return NULL;
@@ -179,29 +205,27 @@ PTE *vm_walkpte(PD *pgdir, size_t va, int prot) {
   }
   PT* pt = PDE2PT(*pde);
   int pt_index = ADDR2TBL(va);
-  PTE *pte = &(pt->pte[pt_index]);
+  PTE* pte = &(pt->pte[pt_index]);
   return pte;
 }
 
-void *vm_walk(PD *pgdir, size_t va, int prot) {
+void* vm_walk(PD* pgdir, size_t va, int prot) {
   // WEEK3-virtual-memory: translate va to pa
   // if prot&1 and prot voilation ((pte->val & prot & 7) != prot), call vm_pgfault
   // if va is not mapped and !(prot&1), return NULL
   // TODO();
-  PTE *pte = vm_walkpte(pgdir, va, prot);
-  if (prot&1 && ((pte->val & prot & 7) != prot)) {
+  PTE* pte = vm_walkpte(pgdir, va, prot);
+  if (prot & 1 && ((pte->val & prot & 7) != prot)) {
     vm_pgfault(va, 2);
   }
-  if (pte == NULL && !(prot&1)) {
+  if (pte == NULL && !(prot & 1)) {
     return NULL;
   }
-  void *page = PTE2PG(*pte);
+  void* page = PTE2PG(*pte);
   return (void*)((uint32_t)page | ADDR2OFF(va));
 }
 
-
-
-void vm_map(PD *pgdir, size_t va, size_t len, int prot) {
+void vm_map(PD* pgdir, size_t va, size_t len, int prot) {
   // WEEK3-virtual-memory: map [PAGE_DOWN(va), PAGE_UP(va+len)) at pgdir, with prot
   // if have already mapped pages, just let pte->prot |= prot
   assert(prot & PTE_P);
@@ -211,10 +235,10 @@ void vm_map(PD *pgdir, size_t va, size_t len, int prot) {
   assert(end >= start);
 
   // TODO();
-  for(int i = start; i < end; i += PGSIZE){
+  for (int i = start; i < end; i += PGSIZE) {
     PTE* pte = vm_walkpte(pgdir, i, prot);
     if (!pte->present) {
-      PTE* new_pte = (PTE *)kalloc();
+      PTE* new_pte = (PTE*)kalloc();
       pte->val = MAKE_PTE(new_pte, prot);
     } else {
       // just let pte->prot |= prot
@@ -224,7 +248,7 @@ void vm_map(PD *pgdir, size_t va, size_t len, int prot) {
   }
 }
 
-void vm_unmap(PD *pgdir, size_t va, size_t len) {
+void vm_unmap(PD* pgdir, size_t va, size_t len) {
   // WEEK3-virtual-memory: unmap and free [va, va+len) at pgdir
   // you can just do nothing :)
   // assert(ADDR2OFF(va) == 0);
@@ -232,52 +256,51 @@ void vm_unmap(PD *pgdir, size_t va, size_t len) {
   // TODO();
   assert(ADDR2OFF(va) == 0);
   assert(ADDR2OFF(len) == 0);
-  for(size_t i=va;i<va+len;i+=PGSIZE){
-    PTE *pte = vm_walkpte(pgdir, i, 0);
-    if(pte->present){
+  for (size_t i = va; i < va + len; i += PGSIZE) {
+    PTE* pte = vm_walkpte(pgdir, i, 0);
+    if (pte->present) {
       kfree(vm_walk(pgdir, i, PTE_P));
     }
-    pte->val=0;
+    pte->val = 0;
   }
   if (pgdir == vm_curr()) {
     set_cr3(pgdir);
-  }  
+  }
 }
 
-void vm_copycurr(PD *pgdir) {
+void vm_copycurr(PD* pgdir) {
   // WEEK4-process-api: copy memory mapped in curr pd to pgdir
   // TODO();
   for (size_t va = PHY_MEM; va < USR_MEM; va += PGSIZE) {
-    PTE *pte_src = vm_walkpte(vm_curr(), va, 0);
+    PTE* pte_src = vm_walkpte(vm_curr(), va, 0);
     if (pte_src != NULL && (pte_src->val & PTE_P)) {
       // WEEK6
       int port = pte_src->val & 7;
       PTE* pte_dest = vm_walkpte(pgdir, va, port | PTE_W);
-      pte_src->read_write = 0; // 权限设为只读
-      pte_dest->val = pte_src->val; // 复制页表项
+      pte_src->read_write = 0;       // 权限设为只读
+      pte_dest->val = pte_src->val;  // 复制页表项
       int index = (size_t)PTE2PG(*pte_dest) / PGSIZE;
-      pm_ref[index]++; // 引用加1
+      pm_ref[index]++;  // 引用加1
     }
   }
   // 处理 [USR_MEM, VIR_MEM) 共享内存区域
   for (size_t va = USR_MEM; va < VIR_MEM; va += PGSIZE) {
-    PTE *pte = vm_walkpte(vm_curr(), va, 0);
+    PTE* pte = vm_walkpte(vm_curr(), va, 0);
     if (pte != NULL && pte->val & PTE_P) {
       int port = pte->val & 7;
-      void *pa = vm_walk(vm_curr(), va, port);
+      void* pa = vm_walk(vm_curr(), va, port);
       int index = (size_t)pa / PGSIZE;
       pm_ref[index]++;
       PTE* new_pte = vm_walkpte(pgdir, va, port);
       *new_pte = *pte;
     }
   }
-
 }
 
 void vm_pgfault(size_t va, int errcode) {
-  if (errcode & 2) { // write error
-    PD *pgdir = vm_curr();
-    PTE *pte = vm_walkpte(pgdir, va, 0);
+  if (errcode & 2) {  // write error
+    PD* pgdir = vm_curr();
+    PTE* pte = vm_walkpte(pgdir, va, 0);
     // Cases that are not real cow: goto bad
     if (pte == NULL || !(pte->val & PTE_P) || !pte->cow) {
       goto bad;
@@ -287,9 +310,9 @@ void vm_pgfault(size_t va, int errcode) {
     int index = (size_t)PTE2PG(*pte) / PGSIZE;
     if (pm_ref[index] > 1) {
       pm_ref[index]--;
-      void *page = kalloc();
+      void* page = kalloc();
       memcpy(page, PTE2PG(*pte), PGSIZE);
-      pte->page_frame = (size_t) page >> 12;
+      pte->page_frame = (size_t)page >> 12;
       pte->cow = pte->read_write;
     }
   } else {
@@ -301,6 +324,12 @@ void vm_pgfault(size_t va, int errcode) {
 bad:
   printf("pagefault @ 0x%p, errcode = %d\n", va, errcode);
   panic("pgfault");
-
 }
 
+void* mmio_map_region(uint32_t pa, uint32_t size) {
+  // WEEK12-network
+  // Reserve size bytes in the DEVSPACE region.
+  // Return the base of the reserved region.  size does *not*
+  // have to be multiple of PGSIZE.
+  return (void*)pa;
+}

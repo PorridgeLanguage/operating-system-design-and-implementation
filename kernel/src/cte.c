@@ -1,9 +1,10 @@
-#include "klib.h"
 #include "cte.h"
-#include "vme.h"
+#include "klib.h"
+#include "network/e1000.h"
+#include "proc.h"
 #include "serial.h"
 #include "timer.h"
-#include "proc.h"
+#include "vme.h"
 
 static GateDesc32 idt[NR_IRQ];
 
@@ -46,12 +47,12 @@ void irq129();
 void irqall();
 
 #define PORT_PIC_MASTER 0x20
-#define PORT_PIC_SLAVE  0xA0
-#define IRQ_SLAVE       2
+#define PORT_PIC_SLAVE 0xA0
+#define IRQ_SLAVE 2
 
 static void init_intr() {
-  outb(PORT_PIC_MASTER, 0x11); // you don't need to understand this
-  outb(PORT_PIC_SLAVE, 0x11); // I don't understand either :)
+  outb(PORT_PIC_MASTER, 0x11);  // you don't need to understand this
+  outb(PORT_PIC_SLAVE, 0x11);   // I don't understand either :)
   outb(PORT_PIC_MASTER + 1, 32);
   outb(PORT_PIC_SLAVE + 1, 32 + 8);
   outb(PORT_PIC_MASTER + 1, 1 << 2);
@@ -61,8 +62,8 @@ static void init_intr() {
 }
 
 void init_cte() {
-  for (int i = 0; i < NR_IRQ; i ++) {
-    idt[i]  = GATE32(STS_IG, KSEL(SEG_KCODE), irqall, DPL_KERN);
+  for (int i = 0; i < NR_IRQ; i++) {
+    idt[i] = GATE32(STS_IG, KSEL(SEG_KCODE), irqall, DPL_KERN);
   }
   idt[0] = GATE32(STS_IG, KSEL(SEG_KCODE), irq0, DPL_KERN);
   idt[1] = GATE32(STS_IG, KSEL(SEG_KCODE), irq1, DPL_KERN);
@@ -104,7 +105,7 @@ void init_cte() {
   init_intr();
 }
 
-void irq_handle(Context *ctx) {
+void irq_handle(Context* ctx) {
   if (ctx->irq <= 16) {
     // just ignore me now, usage is in Lab1-6
     exception_debug_handler(ctx);
@@ -114,16 +115,17 @@ void irq_handle(Context *ctx) {
     // TODO: WEEK2 handle serial and timer
     // TODO: WEEK3-virtual-memory: page fault
     // TODO: WEEK4-process-api: schedule
-    case EX_SYSCALL:{
-      do_syscall(ctx); //系统调用
+    case EX_SYSCALL: {
+      do_syscall(ctx);  // 系统调用
       break;
     }
     case T_IRQ0 + IRQ_COM1: {
-      serial_handle(); // 串口终端
+      serial_handle();  // 串口终端
       break;
     }
     case T_IRQ0 + IRQ_TIMER: {
-      timer_handle(); // 时钟中断
+      timer_handle();  // 时钟中断
+      e1000_emulator_handle();
       break;
     }
     case EX_PF: {

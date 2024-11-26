@@ -82,4 +82,8 @@ struct dirent {
 int sigaction(int signo, const void* act, void** oldact);
 int sigprocmask(int how, const int set, int* oldset);
 
+int arp_create(char* interface, char* ipAddr, char* arpResp, size_t size);
+int arp_serve(char* interface);
+int arp_receive(char* buff, size_t size);
+
 #endif

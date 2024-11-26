@@ -208,3 +208,15 @@ int sigaction(int signo, const void* act, void** oldact) {
 int sigprocmask(int how, const int set, int* oldset) {
   return (int)syscall(SYS_sigprocmask, (size_t)how, (size_t)set, (size_t)oldset, 0, 0);
 }
+
+int arp_create(char* interface, char* ipAddr, char* arpResp, size_t size) {
+  return (int)syscall(SYS_arp_create, (size_t)interface, (size_t)ipAddr, (size_t)arpResp, (size_t)size, 0);
+}
+
+int arp_serve(char* interface) {
+  return (int)syscall(SYS_arp_serve, (size_t)interface, 0, 0, 0, 0);
+}
+
+int arp_receive(char* buff, size_t size) {
+  return (int)syscall(SYS_arp_receive, (size_t)buff, (size_t)size, 0, 0, 0);
+}

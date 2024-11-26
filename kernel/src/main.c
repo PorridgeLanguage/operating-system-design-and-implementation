@@ -3,6 +3,7 @@
 #include "fs.h"
 #include "klib.h"
 #include "loader.h"
+#include "pci.h"
 #include "proc.h"
 #include "serial.h"
 #include "timer.h"
@@ -19,6 +20,7 @@ int main() {
   init_timer();  // uncomment me at WEEK2-interrupt
   init_proc();   // uncomment me at WEEK1-os-start
   init_dev();    // uncomment me at Lab3-1
+  init_pci();
   printf("Hello from OS!\n");
   init_user_and_go();
   panic("should never come back");
