@@ -1,0 +1,75 @@
+#!/usr/bin/env python3
+
+import os
+import re
+import subprocess
+import shutil
+from gradelib import *
+
+r = Runner(save("qemu.out"))
+
+def backup_fs(f):
+  def func():
+    shutil.copyfile("build/os.img", "build/os.backup")
+    try:
+      f()
+    finally:
+      shutil.copyfile("build/os.backup", "build/os.img")
+  func.__name__ = f.__name__
+  return func
+
+""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+
+# 成功编译项目：8%
+@test(10, "compile")
+def test_compile():
+    # Attempt to compile the project
+    result = subprocess.run(['make'], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    
+    # Check if the compilation was successful by inspecting the return code
+    if result.returncode == 0:
+        print("Compilation successful!")
+    else:
+        print("Compilation failed.")
+        print(result.stderr.decode('utf-8'))
+    
+    assert result.returncode == 0, "Compilation did not succeed"
+
+
+""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+
+@test(30, "arptest")
+@backup_fs
+def test_arptest():
+  s = """
+  $ arptest
+  IP 192.168.2.1 has mac 1a:2b:3c:4d:5e:6f
+  $ echo OK
+  OK
+  """
+  script, exps, isregs = parse_script(s)
+  r.run_qemu(stop_on_line(".*Abort @.*"), shell_script(script))
+  r.match(*exps, isregs=isregs, continued=True)
+  
+@test(60, "arptest_multi")
+@backup_fs
+def test_arptest_multi():
+  s = """
+  $ arptest_multi
+  IP 192.168.2.1 has mac 1a:2b:3c:4d:5e:6f
+  IP 192.168.3.1 has mac aa:bb:cc:dd:ee:ff
+  IP 192.168.4.1 has mac 78:56:34:12:ab:cd
+  IP 192.168.5.1 has mac 0:1a:b2:3c:4d:5e 
+  IP 192.168.6.1 has mac 9e:7f:bc:21:34:43
+  IP 192.168.7.1 has mac 2:0:5e:1a:2b:3c
+  IP 192.168.8.1 has mac 8c:8d:ac:11:22:33
+  IP 192.168.9.1 has mac 5e:0:11:22:33:44
+  IP 192.168.10.1 has mac 6b:3a:2d:1e:4f:10
+  $ echo OK
+  OK
+  """
+  script, exps, isregs = parse_script(s)
+  r.run_qemu(stop_on_line(".*Abort @.*"), shell_script(script))
+  r.match(*exps, isregs=isregs, continued=True)
+
+run_tests()

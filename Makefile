@@ -5,7 +5,7 @@ default: all
 .PHONY: clean clean-all clean-fs all qemu qemu-gdb gdb print-gdbport grade submit pack
 
 # REMEMBER TO MAKE CLEAN AFTER CHANGE ME!
-STAGE  := week11
+STAGE  := week12
 STAGES := week1 week2 week3 week4 week5 week6 week7 week8 week9 week10 week11 week12
 
 ifeq ($(filter $(STAGES), $(STAGE)), ) # STAGE must be valid
@@ -21,7 +21,12 @@ LD     := ld
 CFLAGS := -O1 -std=gnu11 -ggdb3 -Wall -Werror -fno-asynchronous-unwind-tables -fno-builtin -fno-stack-protector -Wno-main -ffreestanding -m32 -fno-pic -fno-omit-frame-pointer -march=i386 -fcf-protection=none
 ASFLAGS := -m32 -fno-pic
 LDFLAGS := -m elf_i386
-QEMU_FLAGS := -no-reboot -serial stdio -display none#-nographic
+
+ifeq ($(STAGE), week12)
+QEMU_FLAGS := -no-reboot -serial stdio -display none -netdev user,id=net0 -device e1000,netdev=net0 -object filter-dump,id=f1,netdev=net0,file=./qemu.pcap
+else
+QEMU_FLAGS := -no-reboot -serial stdio -display none
+endif
 
 all: $(IMAGE)
 
@@ -49,8 +54,11 @@ print-gdbport:
 grade:
 	grade/grade-$(STAGE)
 
+grade-oj:
+	grade/grade-$(STAGE)-oj
+
 submit:
-	python3 ok --insecure --config okconfig/$(STAGE).ok --submit
+	python3 ok --config okconfig/$(STAGE).ok --submit
 
 pack:
 	mkdir -p build/submit
@@ -160,7 +168,7 @@ $(USER_ELFS): $(OBJDIR)/%: $(OBJDIR)/%.o $(USER_LIBOBJ) $(LIB_ARCH)
 	@echo LD "->" $@
 	@$(LD) $(LDFLAGS) -e _start -Ttext $(USER_ADDR) $< $(USER_LIBOBJ) $(LIB_ARCH) -o $@
 
-ifeq ($(filter week10 week11 week12 week13, $(STAGE)), $(STAGE))
+ifeq ($(filter week10 week11 week12, $(STAGE)), $(STAGE))
 USER_GENC   := utils/mkfs.c
 USER_GEN    := $(OBJDIR)/utils/mkfs
 else
@@ -168,7 +176,7 @@ USER_GENC   := utils/genuser.c
 USER_GEN    := $(OBJDIR)/utils/genuser
 endif
 
-ifeq ($(filter week9 week10 week11 week12 week13, $(STAGE)), $(STAGE))
+ifeq ($(filter week9 week10 week11 week12, $(STAGE)), $(STAGE))
 USER_FILE   := $(shell find user/file -type f)
 endif
 
