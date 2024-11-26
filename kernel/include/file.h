@@ -51,4 +51,7 @@ int pipe_read(file_t* file, void* buf, uint32_t size);
 int pipe_write(file_t* file, const void* buf, uint32_t size);
 void pipe_close(pipe_t* pipe);
 
+file_t* mkfifo(const char* path, int mode);
+void rmfifo(int no);
+
 #endif

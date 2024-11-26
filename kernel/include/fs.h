@@ -23,6 +23,11 @@ void iadddev(const char* name, int id);
 int iremove(const char* path);
 inode_t* ilink(const char* path, inode_t* old_inode);
 
+int ififoaddr(inode_t* inode);
+void isetfifo(inode_t* ip, void* pipe);
+
+extern void rmfifo(int no);
+
 #ifdef EASY_FS
 
 #define MAX_NAME (31 - 2 * sizeof(uint32_t))

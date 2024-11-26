@@ -366,18 +366,27 @@ int sys_fstat(int fd, struct stat* st) {
     st->type = itype(cur_file->inode);
     st->size = isize(cur_file->inode);
     st->node = ino(cur_file->inode);
+    return 0;
   }
   if (cur_file->type == TYPE_DEV) {
     st->type = TYPE_DEV;
     st->size = 0;
     st->node = 0;
+    return 0;
   }
   if (cur_file->type == TYPE_PIPE) {
     st->type = TYPE_PIPE;
-    st->size = 0;
+    st->size = cur_file->pipe->full;
     st->node = 0;
+    return 0;
   }
-  return 0;
+  if (cur_file->type == TYPE_FIFO) {
+    st->type = TYPE_FIFO;
+    st->size = cur_file->pipe->full;
+    st->node = 0;
+    return 0;
+  }
+  return -1;
 }
 
 int sys_chdir(const char* path) {
@@ -563,33 +572,33 @@ int sys_cv_close(int cv_id) {
 }
 
 int sys_pipe(int fd[2]) {
-  proc_t* cur_proc = proc_curr();
-  if (!fd)
-    return -1;
   file_t* pipe_files[2];
-  if (pipe_open(pipe_files) < 0) {
+  int res = pipe_open(pipe_files);
+  if (res < 0) {
     return -1;
   }
-  int fd_read = proc_allocfile(cur_proc);
-  if (fd_read >= 0) {
-    cur_proc->group_leader->files[fd_read] = pipe_files[0];
-  } else {
+  proc_t* proc = proc_curr()->group_leader;
+  int fd0 = proc_allocfile(proc);
+  if (fd0 < 0) {
     return -1;
   }
-  int fd_write = proc_allocfile(cur_proc);
-  if (fd_write >= 0) {
-    cur_proc->group_leader->files[fd_write] = pipe_files[1];
-  } else {
-    cur_proc->group_leader->files[fd_read] = NULL;
+  proc->files[fd0] = pipe_files[0];
+
+  int fd1 = proc_allocfile(proc);
+  if (fd1 < 0) {
     return -1;
   }
-  fd[0] = fd_read;
-  fd[1] = fd_write;
+  proc->files[fd1] = pipe_files[1];
+  fd[0] = fd0;
+  fd[1] = fd1;
   return 0;
 }
 
 int sys_mkfifo(const char* path, int mode) {
-  TODO();
+  if (!mkfifo(path, mode)) {
+    return -1;
+  }
+  return 0;
 }
 
 int sys_link(const char* oldpath, const char* newpath) {

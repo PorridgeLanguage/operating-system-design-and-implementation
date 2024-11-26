@@ -546,12 +546,19 @@ inode_t* idup(inode_t* inode) {
 void iclose(inode_t* inode) {
   assert(inode);
   if (inode->ref == 1 && inode->del) {
-    itrunc(inode);
-    difree(inode->no);
-    for (int i = 0; i < DINODE_NUM; i++) {  // 在活动dinode数组中找到对应的项并释放它
-      if (&(open_dinodes[i].dinode) == inode->dinode) {
-        open_dinodes[i].no = 0;
-        inode->dinode = NULL;
+    inode->dinode->link_count--;
+    // 如果dinode的link_count为0，释放dinode
+    if (!inode->dinode->link_count) {
+      difree(inode->no);
+      if (inode->dinode->type == TYPE_FIFO) {
+        rmfifo(inode->no);
+      }
+      itrunc(inode);
+      for (int i = 0; i < DINODE_NUM; i++) {  // 在活动dinode数组中找到对应的项并释放它
+        if (&(open_dinodes[i].dinode) == inode->dinode) {
+          open_dinodes[i].no = 0;
+          inode->dinode = NULL;
+        }
       }
     }
   }
@@ -659,63 +666,64 @@ int iremove(const char* path) {
   return 0;
 }
 
-static inode_t* iget_link(uint32_t no, dinode_t* dinode) {
-  for (int i = 0; i < INODE_NUM; i++) {
-    if (inodes[i].no == no) {
-      inodes[i].ref++;
-      return &inodes[i];
-    }
-  }
-  for (int i = 0; i < INODE_NUM; i++) {
-    if (inodes[i].ref == 0) {
-      inodes[i].no = no;
-      inodes[i].ref = 1;
-      inodes[i].del = 0;
-      inodes[i].dinode = dinode;
-      return &inodes[i];
-    }
-  }
-  assert(0);  // 如果没有空槽位，直接终止
-  return NULL;
-}
-
 inode_t* ilink(const char* path, inode_t* old_inode) {
-  dirent_t dirent;
   char name[MAX_NAME + 1];
 
-  // 打开父目录并解析目标文件名
-  inode_t* parent = iopen_parent(path, name);
-  if (parent == NULL || parent->dinode->type != TYPE_DIR) {
-    return NULL;  // 如果路径非法或父目录不存在，返回 NULL
+  inode_t* parent_dir = iopen_parent(path, name);
+  if (parent_dir == NULL) {
+    return NULL;
   }
+  assert(parent_dir->dinode->type == TYPE_DIR);
 
-  uint32_t offset = 0;
-  // 遍历父目录，寻找空的目录项或检测重名冲突
-  uint32_t size = parent->dinode->size;
+  // find empty dirent
+  dirent_t dirent;
+  uint32_t size = parent_dir->dinode->size, empty = size;
   for (uint32_t i = 0; i < size; i += sizeof dirent) {
-    iread(parent, i, &dirent, sizeof dirent);
-    if (dirent.inode != 0 && strcmp(dirent.name, name) == 0) {
-      return NULL;  // 文件名已存在，返回 NULL
+    if (dirent.inode == 0) {
+      if (empty == size)
+        empty = i;
+      continue;
     }
-    if (dirent.inode == 0 && offset == 0) {
-      offset = i;  // 记录空目录项的位置
+    if (strcmp(dirent.name, name) == 0) {
+      iclose(parent_dir);
+      return NULL;
     }
   }
-  if (offset == 0) {
-    offset = size;
+  assert(empty == size);
+
+  // find empty inode
+  inode_t* inode = NULL;
+  for (int i = 0; i < INODE_NUM; i++) {
+    if (inodes[i].ref == 0) {
+      inode = &inodes[i];
+      break;
+    }
   }
-  old_inode->dinode->link_count++;
+  assert(inode);
 
-  inode_t* new_inode = iget_link(dialloc(TYPE_FILE), old_inode->dinode);
+  // initialize inode
+  inode->no = old_inode->no;
+  inode->ref = 1;
+  inode->del = 0;
+  inode->dinode = old_inode->dinode;
+  ++inode->dinode->link_count;
+  iupdate(inode);
 
-  // 初始化新的目录项
+  // write dirent
+  dirent.inode = inode->no;
   strcpy(dirent.name, name);
-  dirent.inode = new_inode->no;
+  iwrite(parent_dir, empty, &dirent, sizeof dirent);
 
-  // 将目录项写入父目录
-  iwrite(parent, offset, &dirent, sizeof(dirent));
+  return inode;
+}
 
-  return new_inode;
+int ififoaddr(inode_t* inode) {
+  return inode->dinode->pipe;
+}
+
+void isetfifo(inode_t* ip, void* pipe) {
+  ip->dinode->pipe = (uint32_t)pipe;
+  iupdate(ip);
 }
 
 #endif

@@ -6,6 +6,8 @@
 #define TOTAL_FILE 128
 
 file_t files[TOTAL_FILE];
+static pipe_t* pipe_alloc();
+static void pipe_init(pipe_t* pipe);
 
 static file_t* falloc() {
   // Lab3-1: find a file whose ref==0, init it, inc ref and return it, return NULL if none
@@ -20,14 +22,14 @@ static file_t* falloc() {
 }
 
 file_t* fopen(const char* path, int mode, int depth) {
-  if (depth > 40) {
+  if (++depth > 40) {
     return NULL;
   }
   file_t* fp = falloc();
   inode_t* ip = NULL;
   if (!fp)
     goto bad;
-  // TODO: Lab3-2, determine type according to mode
+  // Lab3-2, determine type according to mode
   // iopen in Lab3-2: if file exist, open and return it
   //       if file not exist and type==TYPE_NONE, return NULL
   //       if file not exist and type!=TYPE_NONE, create the file as type
@@ -47,18 +49,19 @@ file_t* fopen(const char* path, int mode, int depth) {
     goto bad;
   int type = itype(ip);
   if (type == TYPE_FILE || type == TYPE_DIR) {
-    // TODO: Lab3-2, if type is not DIR, go bad if mode&O_DIR
-    if (type != TYPE_DIR && mode & O_DIR) {
+    // Lab3-2, if type is not DIR, go bad if mode&O_DIR
+    if (type != TYPE_DIR && (mode & O_DIR)) {
       goto bad;
     }
-    // TODO: Lab3-2, if type is DIR, go bad if mode WRITE or TRUNC
+    // Lab3-2, if type is DIR, go bad if mode WRITE or TRUNC
     if (type == TYPE_DIR && (mode & O_WRONLY || mode & O_RDWR || mode & O_TRUNC)) {
       goto bad;
     }
-    // TODO: Lab3-2, if mode&O_TRUNC, trunc the file
-    if (type == TYPE_FILE && mode & O_TRUNC) {
+    // Lab3-2, if mode&O_TRUNC, trunc the file
+    if (mode & O_TRUNC) {
       itrunc(ip);
     }
+
     fp->type = TYPE_FILE;  // file_t don't and needn't distingush between file and dir
     fp->inode = ip;
     fp->offset = 0;
@@ -68,17 +71,28 @@ file_t* fopen(const char* path, int mode, int depth) {
     iclose(ip);
     ip = NULL;
   } else if (type == TYPE_SYMLINK) {
-    char buffer[MAX_NAME + 1] = {0};
-    if (iread(ip, 0, buffer, MAX_NAME + 1) < 0)
-      goto bad;
-
+    char path[MAX_NAME + 1];
+    memset(path, 0, sizeof path);
+    iread(ip, 0, path, MAX_NAME + 1);
     iclose(ip);
-    ip = NULL;
-
-    // 递归打开符号链接指向的文件
-    return fopen(buffer, mode, depth + 1);
-  } else
+    return fopen(path, mode, depth + 1);
+  } else if (type == TYPE_FIFO) {
+    fp->type = TYPE_FIFO;
+    fp->pipe = (pipe_t*)ififoaddr(ip);
+    fp->inode = ip;
+    if (fp->pipe->no != ino(fp->inode)) {
+      pipe_t* pipe = pipe_alloc();
+      if (pipe == NULL) {
+        goto bad;
+      }
+      pipe_init(pipe);
+      fp->pipe = pipe;
+      isetfifo(fp->inode, pipe);
+      pipe->no = ino(fp->inode);
+    }
+  } else {
     assert(0);
+  }
   fp->readable = !(mode & O_WRONLY);
   fp->writable = (mode & O_WRONLY) || (mode & O_RDWR);
   return fp;
@@ -110,23 +124,26 @@ int fread(file_t* file, void* buf, uint32_t size) {
     }
   }
 
-  int offset = -1;
+  int read_bytes = -1;
   if (file->type == TYPE_FILE) {
     // 磁盘文件
-    offset = iread(file->inode, file->offset, buf, size);
-    if (offset == -1) {
+    read_bytes = iread(file->inode, file->offset, buf, size);
+    if (read_bytes == -1) {
       return -1;  // 读取失败
     }
-    file->offset += offset;
+    file->offset += read_bytes;
   }
   if (file->type == TYPE_DEV) {
     // 设备文件
-    offset = file->dev_op->read(buf, size);
+    read_bytes = file->dev_op->read(buf, size);
   }
   if (file->type == TYPE_PIPE) {
-    offset += pipe_read(file, buf, size);
+    read_bytes = pipe_read(file, buf, size);
   }
-  return offset;
+  if (file->type == TYPE_FIFO) {
+    read_bytes = pipe_read(file, buf, size);
+  }
+  return read_bytes;
 }
 
 int fwrite(file_t* file, const void* buf, uint32_t size) {
@@ -134,21 +151,24 @@ int fwrite(file_t* file, const void* buf, uint32_t size) {
   // remember to add offset if type is FILE (check if iwrite return value >= 0!)
   if (!file->writable)
     return -1;
-  int offset = -1;
+  int write_size = -1;
   if (file->type == TYPE_FILE) {  // 是磁盘文件
-    offset = iwrite(file->inode, file->offset, buf, size);
-    if (offset == -1) {
+    write_size = iwrite(file->inode, file->offset, buf, size);
+    if (write_size == -1) {
       return -1;
     }
-    file->offset += offset;
+    file->offset += write_size;
   }
   if (file->type == TYPE_DEV) {  // 是设备文件
-    offset = file->dev_op->write(buf, size);
+    write_size = file->dev_op->write(buf, size);
   }
   if (file->type == TYPE_PIPE) {
-    offset += pipe_write(file, buf, size);
+    write_size = pipe_write(file, buf, size);
   }
-  return offset;
+  if (file->type == TYPE_FIFO) {
+    write_size = pipe_write(file, buf, size);
+  }
+  return write_size;
 }
 
 uint32_t fseek(file_t* file, uint32_t off, int whence) {
@@ -156,12 +176,12 @@ uint32_t fseek(file_t* file, uint32_t off, int whence) {
   if (file->type == TYPE_FILE) {
     if (whence == SEEK_SET) {
       file->offset = off;
-    }
-    if (whence == SEEK_CUR) {
+    } else if (whence == SEEK_CUR) {
       file->offset += off;
-    }
-    if (whence == SEEK_END) {
+    } else if (whence == SEEK_END) {
       file->offset = isize(file->inode) + off;
+    } else {
+      return -1;
     }
     return file->offset;
   }
@@ -170,82 +190,70 @@ uint32_t fseek(file_t* file, uint32_t off, int whence) {
 
 file_t* fdup(file_t* file) {
   // Lab3-1, inc file's ref, then return itself
-  file->ref++;
+  if (file) {
+    file->ref++;
+  }
   return file;
 }
 
 void fclose(file_t* file) {
-  // Lab3-1, dec file's ref, if ref==0 and it's a file, call iclose
   file->ref--;
-  if (file->ref == 0 && file->type == TYPE_FILE) {
-    iclose(file->inode);
-  }
-  if (file->type == TYPE_PIPE) {
-    pipe_t* pipe = file->pipe;
-
-    // 使用信号量保护对管道状态的修改
-    sem_p(&pipe->mutex);
-
-    if (file->readable) {
-      pipe->read_open = 0;   // 关闭读口
-      sem_v(&pipe->cv_buf);  // 唤醒可能在等待写缓冲的线程
+  if (file && file->ref == 0) {
+    if (file->type == TYPE_FILE || file->type == TYPE_FIFO) {
+      iclose(file->inode);
+    } else if (file->type == TYPE_PIPE) {
+      pipe_t* pipe = file->pipe;
+      sem_p(&pipe->mutex);
+      if (file->readable) {
+        pipe->read_open = 0;
+      }
+      if (file->writable) {
+        pipe->write_open = 0;
+      }
+      if (pipe->read_open == 0 && pipe->write_open == 0) {
+        pipe_close(pipe);
+      }
+      while (pipe->cv_buf.value < 0) {
+        sem_v(&pipe->cv_buf);
+      }
+      sem_v(&pipe->mutex);
     }
-    if (file->writable) {
-      pipe->write_open = 0;  // 关闭写口
-      sem_v(&pipe->cv_buf);  // 唤醒可能在等待读缓冲的线程
-    }
-
-    // 如果读口和写口都关闭，释放管道资源
-    if (pipe->read_open == 0 && pipe->write_open == 0) {
-      sem_v(&pipe->mutex);  // 释放信号量
-      pipe_close(pipe);     // 释放管道资源
-      return;
-    }
-
-    sem_v(&pipe->mutex);  // 释放信号量
+    file->type = TYPE_NONE;
   }
 }
 
 int flink(const char* oldpath, const char* newpath) {
   inode_t* old_inode = iopen(oldpath, TYPE_NONE);
-  if (!old_inode) {
+  if (old_inode == NULL) {
     return -1;
   }
-
-  if (ilink(newpath, old_inode) == NULL) {
-    iclose(old_inode);
-    return -1;
-  }
+  inode_t* new_inode = ilink(newpath, old_inode);
   iclose(old_inode);
+  if (new_inode == NULL) {
+    return -1;
+  }
+  iclose(new_inode);
   return 0;
 }
 
 int fsymlink(const char* oldpath, const char* newpath) {
-  // 检查 newpath 是否已经存在
-  inode_t* new_inode = iopen(newpath, TYPE_NONE);
-  if (new_inode) {
-    iclose(new_inode);
-    return -1;  // newpath 已经存在
+  if (fopen(newpath, O_RDONLY, 0)) {
+    return -1;
   }
 
-  // 创建 newpath 文件
-  new_inode = iopen(newpath, TYPE_SYMLINK);
-  if (!new_inode) {
-    return -1;  // 创建失败
+  inode_t* inode = iopen(newpath, TYPE_SYMLINK);
+  if (inode == NULL) {
+    return -1;
   }
 
-  // 准备写入的路径内容
-  char buffer[MAX_NAME + 1] = {0};  // 全部初始化为 0
-  strncpy(buffer, oldpath, MAX_NAME);
-
-  // 将路径写入符号链接文件
-  if (iwrite(new_inode, 0, buffer, MAX_NAME + 1) < 0) {
-    iclose(new_inode);
-    return -1;  // 写入失败
-  }
-
-  iclose(new_inode);
-  return 0;  // 成功
+  char path[MAX_NAME + 1];
+  memset(path, 0, sizeof path);
+  size_t len = strlen(oldpath);
+  memcpy(path, oldpath, len);
+  path[len] = '\0';
+  iwrite(inode, 0, path, len + 1);
+  iclose(inode);
+  return 0;
 }
 
 #define TOTAL_PIPE 32
@@ -276,7 +284,6 @@ void pipe_init(pipe_t* pipe) {
   sem_init(&pipe->mutex, 1);
   sem_init(&pipe->cv_buf, 0);
 
-  memset(pipe->buffer, 0, PIPE_SIZE);  // 清空缓冲区
   pipe->no = 0;
 }
 
@@ -338,78 +345,126 @@ void pipe_close(pipe_t* pipe) {
 
 int pipe_write(file_t* file, const void* buf, uint32_t size) {
   pipe_t* pipe = file->pipe;
+  sem_t* cv_buf = &pipe->cv_buf;
+  uint32_t write_bytes = 0;
+
   const char* data = (const char*)buf;
-  uint32_t written = 0;
-  while (written < size) {
-    sem_p(&pipe->mutex);
-    // 写口关闭，返回错误
-    if (!pipe->write_open) {
+  sem_p(&pipe->mutex);
+  while (write_bytes < size) {
+    if (pipe->write_open == 0) {
       sem_v(&pipe->mutex);
       return -1;
     }
-
-    // 管道空位不足，等待
-    while (pipe->empty == 0) {
-      if (!pipe->read_open) {  // 读口关闭
-        sem_v(&pipe->mutex);
-        return written;
-      }
+    if (pipe->read_open == 0) {
       sem_v(&pipe->mutex);
-      sem_p(&pipe->cv_buf);
+      return write_bytes;
+    }
+
+    if (pipe->empty == 0) {
+      sem_v(&pipe->mutex);
+      if (cv_buf->value < 0) {
+        sem_v(cv_buf);
+      }
+      sem_p(cv_buf);
       sem_p(&pipe->mutex);
+      continue;
     }
-    // 写入数据到管道
-    uint32_t writable = (size - written < pipe->empty) ? (size - written) : pipe->empty;
-    for (uint32_t i = 0; i < writable; i++) {
-      pipe->buffer[pipe->write_pos] = data[written++];
-      pipe->write_pos = (pipe->write_pos + 1) % PIPE_SIZE;
-    }
-    pipe->full += writable;
-    pipe->empty -= writable;
 
-    sem_v(&pipe->cv_buf);  // 通知可能的读操作
-    sem_v(&pipe->mutex);
+    pipe->buffer[pipe->write_pos] = data[write_bytes];
+    pipe->write_pos = (pipe->write_pos + 1) % PIPE_SIZE;
+    write_bytes++;
+    pipe->full++;
+    pipe->empty--;
   }
+  if (cv_buf->value < 0) {
+    sem_v(cv_buf);
+  }
+  sem_v(&pipe->mutex);
 
-  return written;
+  return write_bytes;
 }
 
 int pipe_read(file_t* file, void* buf, uint32_t size) {
   pipe_t* pipe = file->pipe;
-  char* data = (char*)buf;
-  uint32_t read = 0;
+  sem_t* mutex = &pipe->mutex;
+  sem_t* cv_buf = &pipe->cv_buf;
+  uint32_t read_bytes = 0;
 
-  while (read < size) {
-    sem_p(&pipe->mutex);
-    // 读口关闭，返回错误
-    if (!pipe->read_open) {
-      sem_v(&pipe->mutex);
+  sem_p(mutex);
+  while (pipe->full == 0) {
+    if (pipe->read_open == 0) {
+      sem_v(mutex);
       return -1;
     }
-
-    // 管道为空，等待
-    while (pipe->full == 0) {
-      if (!pipe->write_open) {  // 写口关闭
-        sem_v(&pipe->mutex);
-        return read;
-      }
-      sem_v(&pipe->mutex);
-      sem_p(&pipe->cv_buf);
-      sem_p(&pipe->mutex);
+    if (pipe->write_open == 0 && pipe->full == 0) {
+      sem_v(mutex);
+      return read_bytes;
     }
-
-    // 从管道读取数据
-    uint32_t readable = (size - read < pipe->full) ? (size - read) : pipe->full;
-    for (uint32_t i = 0; i < readable; i++) {
-      data[read++] = pipe->buffer[pipe->read_pos];
-      pipe->read_pos = (pipe->read_pos + 1) % PIPE_SIZE;
+    sem_v(mutex);
+    if (cv_buf->value < 0) {
+      sem_v(cv_buf);
     }
-    pipe->full -= readable;
-    pipe->empty += readable;
-
-    sem_v(&pipe->cv_buf);  // 通知可能的写操作
-    sem_v(&pipe->mutex);
+    sem_p(cv_buf);
+    sem_p(mutex);
+    continue;
   }
 
-  return read;
+  size = MIN(size, pipe->full);
+  while (read_bytes < size) {
+    ((char*)buf)[read_bytes] = pipe->buffer[pipe->read_pos];
+    pipe->read_pos = (pipe->read_pos + 1) % PIPE_SIZE;
+    read_bytes++;
+    pipe->full--;
+    pipe->empty++;
+    sem_v(mutex);
+  }
+  if (cv_buf->value < 0) {
+    sem_v(cv_buf);
+  }
+  sem_v(mutex);
+  return read_bytes;
+}
+
+file_t* mkfifo(const char* path, int mode) {
+  if (fopen(path, O_RDONLY, 0)) {
+    return NULL;  // 检查是否已经存在
+  }
+  inode_t* inode = iopen(path, TYPE_FIFO);
+  if (!inode)
+    return NULL;
+
+  pipe_t* pipe = pipe_alloc();
+  if (pipe == NULL) {
+    iclose(inode);
+    return NULL;
+  }
+
+  pipe_init(pipe);
+  isetfifo(inode, pipe);
+
+  file_t* fp = falloc();
+  if (fp == NULL) {
+    iclose(inode);
+    return NULL;
+  }
+  fp->type = TYPE_PIPE;
+  fp->ref = 1;
+  fp->pipe = pipe;
+  fp->inode = inode;
+  fp->dev_op = NULL;
+  fp->readable = !(mode & O_WRONLY);
+  fp->writable = (mode & O_WRONLY) || (mode & O_RDWR);
+  fp->offset = 0;
+
+  pipe->no = ino(inode);
+  iclose(inode);
+  return fp;
+}
+
+void rmfifo(int no) {
+  for (int i = 0; i < TOTAL_PIPE; i++) {
+    if (pipes[i].no == no) {
+      pipe_close(&pipes[i]);
+    }
+  }
 }
