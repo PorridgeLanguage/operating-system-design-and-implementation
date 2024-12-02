@@ -1,6 +1,6 @@
 {
-    "name": "week11",
-    "endpoint": "week11",
+    "name": "week12",
+    "endpoint": "week12",
     "src": [
         "boot/boot.c",
         "boot/boot.h",
@@ -53,7 +53,7 @@
         "kernel/src/network/e1000.c",
         "kernel/src/network/nic.c",
         "kernel/src/network/network_emulator.c",
-        "kernel/src/pci.c",
+        "kernel/src/pci.c"
     ],
     "tests": {},
     "protocols": [

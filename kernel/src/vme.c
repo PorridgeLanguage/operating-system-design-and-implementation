@@ -74,15 +74,8 @@ void init_page() {
   }
 
   for (uint32_t addr = VIR_MEM; addr < MMIO_MEM; addr += PGSIZE) {
-    uint32_t dir_idx = ADDR2DIR(addr);
-    uint32_t tbl_idx = ADDR2TBL(addr);
-
-    if (!(kpd.pde[dir_idx].present)) {
-      kpd.pde[dir_idx].val = MAKE_PDE(kalloc(), PTE_W);
-      memset(PDE2PT(kpd.pde[dir_idx]), 0, PGSIZE);
-    }
-    PT* pt = PDE2PT(kpd.pde[dir_idx]);
-    pt->pte[tbl_idx].val = MAKE_PTE(addr, PTE_W);
+    PTE* pte = vm_walkpte(&kpd, addr, PTE_P | PTE_W);
+    pte->val = MAKE_PTE(addr, PTE_P | PTE_W);
   }
 }
 
@@ -140,19 +133,8 @@ PD* vm_alloc() {
   }
 
   for (uint32_t addr = VIR_MEM; addr < MMIO_MEM; addr += PGSIZE) {
-    uint32_t dir_idx = ADDR2DIR(addr);
-    uint32_t tbl_idx = ADDR2TBL(addr);
-
-    if (!(pgdir->pde[dir_idx].present)) {
-      PT* new_pt = (PT*)kalloc();
-      if (new_pt == NULL) {
-        return NULL;  // 分配失败
-      }
-      memset(new_pt, 0, PGSIZE);  // 初始化页表为0
-      pgdir->pde[dir_idx].val = MAKE_PDE(new_pt, PTE_W | PTE_P);
-    }
-    PT* pt = PDE2PT(pgdir->pde[dir_idx]);
-    pt->pte[tbl_idx].val = MAKE_PTE(addr, PTE_W);
+    PTE* pte = vm_walkpte(pgdir, addr, PTE_P | PTE_W);
+    pte->val = MAKE_PTE(addr, PTE_P | PTE_W);
   }
   return pgdir;
 }

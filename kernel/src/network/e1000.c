@@ -132,13 +132,29 @@ int e1000_attach(struct pci_func* pcif) {
 
 int e1000_transmit(const char* buf, unsigned int len) {
   // TODO: WEEK12-network, handle transmitting net message
-  TODO();
+  uint32_t tdt = e1000[E1000_TDT] % TXRING_LEN;
+  struct e1000_tx_desc* desc = &tx_desc_buf[tdt];
 
-  return 0;  // Return success
+  if ((desc->status & E1000_TXD_STAT_DD) != 1) {
+    return -1;
+  }
+
+  memcpy(tx_data_buf[tdt].data, buf, len);
+  desc->cmd |= (E1000_TXD_CMD_RS | E1000_TXD_CMD_EOP);
+  e1000[E1000_TDT] = (tdt + 1) % TXRING_LEN;
+  desc->status = 0;
+  return 0;
 }
 
 int e1000_receive(char* buf, unsigned int len) {
   // TODO: WEEK12-network, handle receiving net message
-  TODO();
-  return len;  // Return the length of the received data
+  uint32_t rdt = e1000[E1000_RDT] % RXRING_LEN;
+  struct e1000_rx_desc* desc = &rx_desc_buf[rdt];
+  if ((desc->status & E1000_RXD_STAT_DD) != 1) {
+    return -1;
+  }
+  memcpy(buf, rx_data_buf[rdt].data, len);
+  e1000[E1000_RDT] += 1;  // I don't know why not need % RXRING_LEN
+  desc->status = 0;
+  return len;
 }
